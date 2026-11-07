@@ -20,7 +20,7 @@
 
   模板结构（按先后顺序，声明名即 Grep 定位锚点）：
   <style> 区               全部样式
-  <body> .topbar           主页面：标题栏（输出语言 / 选择标签在右）/ 搜索 / 双栏工作区（左正负提示词框，右正负胶囊）
+  <body> .topbar           主页面：标题栏（左标题 / 中间收窄搜索框 / 右输出语言、选择标签）/ 双栏工作区（左正负提示词框，右正负胶囊）
   <div class="mask">       标签库弹窗：.modal 内是分类胶囊 + 二级分类 + 标签面板
   const FULL_TAGS = ...    占位行，构建时替换成全量数据
   const CURATED = {...}    常用分类（人工精选：质量词 / 年代/日期 / 发色 / 服装 …）
@@ -63,12 +63,14 @@
 
   /* ===== 主页面：标题 / 搜索 / 输出，中间输出区吃掉剩余高度 ===== */
   .topbar{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;padding:12px 16px 14px}
-  .head{flex:none;display:flex;align-items:center;gap:10px}
+  /* 标题栏三栏网格：左标题 / 中间收窄的搜索框（真正居中，两侧等宽轨道）/ 右按钮 */
+  .head{flex:none;display:grid;grid-template-columns:minmax(0,1fr) 460px minmax(0,1fr);align-items:center;gap:12px}
   .head h1{font-size:16px;font-weight:650;letter-spacing:.2px;white-space:nowrap;flex:none}
   .head .meta{font-size:12px;color:var(--text2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .head .spacer{flex:1}
+  .head-left{display:flex;align-items:center;gap:10px;min-width:0}
+  .head-right{display:flex;align-items:center;justify-content:flex-end;gap:10px;min-width:0}
   .head .btn{flex:none;white-space:nowrap}
-  .search{position:relative;flex:none}
+  .search{position:relative;min-width:0}
   .search input{width:100%;padding:10px 13px;background:var(--card2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:14px;outline:none;transition:border-color .12s,box-shadow .12s}
   .search input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
   .search input::placeholder{color:#5d6b7d}
@@ -88,6 +90,9 @@
   /* 工作区：左列提示词、右列胶囊，两列都是「上正下负」，行高一一对齐 */
   .workspace{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.12fr) minmax(0,1fr);gap:12px}
   .col{display:flex;flex-direction:column;gap:12px;min-height:0}
+  /* 上半区（正面）吃更多高度：正面 : 负面 ≈ 1.7 : 1，左右两列同一比例，行高继续一一对齐 */
+  .col > :first-child{flex:1.7 1 0}
+  .col > :last-child{flex:1 1 0}
   .obox,.chipbox{flex:1;min-height:0;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:11px 12px;display:flex;flex-direction:column;gap:8px}
   .obox label,.chipbox label{font-size:13px;color:var(--text2);display:flex;align-items:center;gap:8px;flex:none;letter-spacing:.2px}
   .obox label .cnt,.chipbox label .cnt{font-size:12px;color:var(--text);background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:0 7px;line-height:1.6}
@@ -105,9 +110,9 @@
   .obox textarea.neg{border-left:3px solid var(--neg)}
   .chips{flex:1;min-height:0;display:flex;flex-wrap:wrap;align-content:flex-start;gap:7px;overflow-y:auto;overscroll-behavior:contain}
   .chips .chips-empty{color:var(--text2);font-size:13.5px;line-height:1.7;padding:2px 2px;opacity:.8}
-  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--border);border-radius:16px;padding:5px 11px;font-size:14px;line-height:1.5;cursor:grab}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--border);border-radius:16px;padding:4px 10px;font-size:13px;line-height:1.5;cursor:grab}
   .chip .zh{color:var(--text)}
-  .chip .en{color:var(--text2);font-size:12.5px}
+  .chip .en{color:var(--text2);font-size:11.5px}
   .chip .x{color:var(--text2);font-weight:700;opacity:.7;cursor:pointer}
   .chip{cursor:grab}
   .chip:active{cursor:grabbing}
@@ -131,6 +136,12 @@
   .btn.ghost{background:var(--accent-soft);color:var(--accent);border-color:rgba(79,142,247,.55)}
   .btn.ghost:hover{border-color:var(--accent);background:rgba(79,142,247,.2)}
   .btn:active{transform:translateY(1px)}
+  /* 窗口不够宽时三栏网格会把按钮挤出去：标题栏先退回换行，搜索框独占第二行 */
+  @media (max-width:1000px){
+    .head{display:flex;flex-wrap:wrap;row-gap:8px}
+    .head-left{flex:1 1 auto}
+    .search{order:3;flex:1 1 100%}
+  }
   @media (max-width:860px){
     .topbar{overflow-y:auto}
     .workspace{grid-template-columns:1fr;flex:none}
@@ -195,17 +206,19 @@
 
 <div class="topbar">
   <div class="head">
-    <h1>AI 绘画提示词超市</h1>
-    <span class="meta" id="meta"></span>
-    <span class="spacer"></span>
-    <button class="btn ghost" id="outputLangBtn" onclick="toggleOutputLanguage()" title="只切换输出格式，保留标签、顺序、正负和权重">输出语言：English</button>
-    <button class="btn primary" id="openLibBtn" onclick="openLibrary()" title="打开标签库（分类浏览）">选择标签</button>
-  </div>
-
-  <!-- ① 全局标签搜索（直接加入提示词，不用开标签库） -->
-  <div class="search">
-    <input id="search" type="text" placeholder="🔍 全局搜索全量标签（中文或英文，如：大胸 / masturbation / 高马尾）" autocomplete="off">
-    <div class="results" id="searchRes"></div>
+    <div class="head-left">
+      <h1>AI 绘画提示词超市</h1>
+      <span class="meta" id="meta"></span>
+    </div>
+    <!-- ① 全局标签搜索（直接加入提示词，不用开标签库）：收窄后嵌进标题栏正中 -->
+    <div class="search">
+      <input id="search" type="text" placeholder="🔍 全局搜索全量标签（中文 / 英文，如：大胸 / 高马尾）" autocomplete="off">
+      <div class="results" id="searchRes"></div>
+    </div>
+    <div class="head-right">
+      <button class="btn ghost" id="outputLangBtn" onclick="toggleOutputLanguage()" title="只切换输出格式，保留标签、顺序、正负和权重">输出语言：English</button>
+      <button class="btn primary" id="openLibBtn" onclick="openLibrary()" title="打开标签库（分类浏览）">选择标签</button>
+    </div>
   </div>
 
   <!-- ② 工作区：左列上正面下负面提示词，右列同位置上正面下负面胶囊 -->
