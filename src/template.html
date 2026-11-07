@@ -1,0 +1,1005 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 绘画提示词超市</title>
+<!--
+  ════════════════════════════════════════════════════════════
+  AI 绘画提示词超市 — 结构导航 + 维护手册（AI / 大模型读本文件前必读）
+  ════════════════════════════════════════════════════════════
+
+  ⚠️⚠️ 最高优先级警告 ⚠️⚠️
+  本文件是**模板**（src/template.html），改代码只改这里。
+  根目录 ai-prompt-supermarket.html 是构建产物（已 gitignore，不进仓库），由 `node tools/build.mjs` 生成，不要手改。
+  全量标签库不在模板里：模板只有一行占位
+    const FULL_TAGS = /*__FULL_TAGS__*/[];
+  构建时整行替换成单行约 14MB、317,423 条的数据（来源 supermarket_full_tags_317423.json）。
+  ● 查 / 改某个标签：用 Grep 搜源 JSON 的 `["标签英文名",`（例：["newest",）或直接 grep JSON。
+  ● 全量数据只改源 JSON，再 `node tools/build.mjs`；`--check` 校验产物与模板 / 数据一致、脚本语法可编译。
+
+  模板结构（按先后顺序，声明名即 Grep 定位锚点）：
+  <style> 区               全部样式
+  <body> .topbar           主页面：标题栏（输出语言 / 选择标签在右）/ 搜索 / 双栏工作区（左正负提示词框，右正负胶囊）
+  <div class="mask">       标签库弹窗：.modal 内是分类胶囊 + 二级分类 + 标签面板
+  const FULL_TAGS = ...    占位行，构建时替换成全量数据
+  const CURATED = {...}    常用分类（人工精选：质量词 / 年代/日期 / 发色 / 服装 …）
+  const AUTO = {...}       自动归类规则（en 关键词→分类）+ AUTO_RE + AUTO_EXCLUDE
+  const NEG_WORDS          负面词集合
+  const CURATED_ZH = {...} 人工中文翻译补丁（优先于数据库内中文）
+  const SUBS = {...}       二级标签细分
+  /* 构建分类 */            fullMap / catMap / buildCats() / 回填识别
+  之后                     渲染 + 事件绑定（分类面板、搜索、权重、标签库弹窗开关）
+
+  数据库维护（增删改标签）：
+  条目格式：["英文名","中文名",分类号,热度count]  例：["long_hair","长发",0,6089154]
+  分类号：0=通用  1=画师  3=版权/作品  4=角色  5=meta（元信息，Danbooru 枚举本来就没有 2）
+  ● 加到「常用分类」（无需碰数据）：在模板的 const CURATED 对应分类数组加英文名（如 "newest"）；
+      库里没这词 → 顺便在 CURATED_ZH 补中文（否则界面显示英文原文）。该改动只影响界面分类。
+  ● 加到「全局搜索也可搜」：把整条 ["英文名","中文",分类号,0] 写进源 JSON，
+      再 `node tools/build.mjs`，然后 `--check`。
+  ● 删全量标签：只改源 JSON，build + check。
+  ● 改中文名：优先 CURATED_ZH（改动在模板），或改源 JSON 里对应条目再 build。
+  ● 分类号 5（meta：分辨率 / 评论 / 来源 / 差分 / 媒材）不自动成类，只有 CURATED 里点名的
+      才会出现在「来源 / 画质」「媒材 / 手绘」；其余 400 多条只能靠全局搜索找到。
+  ● count 影响排序：新词填 0 可搜到，但不会排进「全部」前 1000。
+-->
+<style>
+  :root{
+    --bg:#0d1117; --card:#161c26; --card2:#0a0e14; --border:#232b38;
+    --text:#e6edf3; --text2:#8896a8; --accent:#4f8ef7; --accent-soft:rgba(79,142,247,.14);
+    --pos:#2dd4bf; --pos-soft:rgba(45,212,191,.13); --neg:#f87171; --neg-soft:rgba(248,113,113,.13);
+    --radius:10px; --radius-sm:6px;
+  }
+  /* 只保留深色一套主题 */
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font:14px/1.55 -apple-system,"Segoe UI","Microsoft YaHei",sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+  button{font:inherit;cursor:pointer;border:none;background:none;color:inherit}
+  ::-webkit-scrollbar{width:10px;height:10px}
+  ::-webkit-scrollbar-thumb{background:#2b3546;border-radius:6px;border:2px solid transparent;background-clip:padding-box}
+  ::-webkit-scrollbar-thumb:hover{background:#3a465c;background-clip:padding-box;border:2px solid transparent}
+  ::-webkit-scrollbar-track{background:transparent}
+  ::selection{background:var(--accent-soft)}
+
+  /* ===== 主页面：标题 / 搜索 / 输出，中间输出区吃掉剩余高度 ===== */
+  .topbar{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;padding:12px 16px 14px}
+  .head{flex:none;display:flex;align-items:center;gap:10px}
+  .head h1{font-size:16px;font-weight:650;letter-spacing:.2px;white-space:nowrap;flex:none}
+  .head .meta{font-size:12px;color:var(--text2);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .head .spacer{flex:1}
+  .head .btn{flex:none;white-space:nowrap}
+  .search{position:relative;flex:none}
+  .search input{width:100%;padding:10px 13px;background:var(--card2);border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:14px;outline:none;transition:border-color .12s,box-shadow .12s}
+  .search input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+  .search input::placeholder{color:#5d6b7d}
+  /* 下拉用 fixed：位置由 layoutSearchResults() 按输入框实际坐标设置，不会被任何滚动容器裁掉；
+     overscroll-behavior 阻断滚动穿透。z-index 150 低于标签库弹窗（200）。 */
+  .search .results{position:fixed;top:0;left:0;width:min(520px,100vw);background:var(--card);border:1px solid var(--border);border-radius:var(--radius);max-height:min(58vh,480px);overflow-y:auto;overscroll-behavior:contain;box-shadow:0 8px 24px rgba(0,0,0,.4);display:none;z-index:150}
+  .search .results.show{display:block}
+  .search .results .r-tag{display:flex;align-items:center;gap:8px;padding:9px 12px;font-size:13.5px;line-height:1.4;cursor:pointer}
+  .search .results .r-tag:hover{background:var(--accent-soft)}
+  .search .results .r-tag .en{color:var(--accent);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;min-width:0}
+  .search .results .r-tag .zh{color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 1 auto;min-width:0}
+  .search .results .r-tag.sel{background:var(--pos-soft)}
+  .search .results .r-tag.neg-sel{background:var(--neg-soft)}
+  .search .results .empty{padding:14px 12px;color:var(--text2);font-size:13px;text-align:center}
+  html[data-output-lang="zh"] .tagpanel .tag .en{display:none}
+
+  /* 工作区：左列提示词、右列胶囊，两列都是「上正下负」，行高一一对齐 */
+  .workspace{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.12fr) minmax(0,1fr);gap:12px}
+  .col{display:flex;flex-direction:column;gap:12px;min-height:0}
+  .obox,.chipbox{flex:1;min-height:0;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:11px 12px;display:flex;flex-direction:column;gap:8px}
+  .obox label,.chipbox label{font-size:13px;color:var(--text2);display:flex;align-items:center;gap:8px;flex:none;letter-spacing:.2px}
+  .obox label .cnt,.chipbox label .cnt{font-size:12px;color:var(--text);background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:0 7px;line-height:1.6}
+  .chipbox label .tip{margin-left:auto;font-size:11.5px;color:var(--text2);opacity:.75;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  /* 文本框右上角的操作按钮（复制 / 清未识别） */
+  .obox label .acts{margin-left:auto;display:flex;align-items:center;gap:6px;flex:none}
+  .mini{padding:2px 10px;border-radius:6px;font-size:12px;font-weight:600;line-height:1.7;border:1px solid rgba(79,142,247,.4);background:var(--accent-soft);color:var(--accent);transition:background .12s,border-color .12s,transform .06s}
+  .mini:hover{border-color:var(--accent);background:rgba(79,142,247,.22)}
+  .mini.danger{border-color:rgba(248,113,113,.4);background:var(--neg-soft);color:var(--neg)}
+  .mini.danger:hover{border-color:var(--neg);background:rgba(248,113,113,.2)}
+  .mini:active{transform:translateY(1px)}
+  .obox textarea{width:100%;flex:1;min-height:90px;background:var(--card2);border:1px solid var(--border);border-radius:var(--radius-sm);color:var(--text);font-family:Consolas,monospace;font-size:15px;line-height:1.7;letter-spacing:.2px;padding:11px 13px;resize:none;outline:none}
+  .obox textarea:focus{border-color:var(--accent)}
+  .obox textarea.pos{border-left:3px solid var(--pos)}
+  .obox textarea.neg{border-left:3px solid var(--neg)}
+  .chips{flex:1;min-height:0;display:flex;flex-wrap:wrap;align-content:flex-start;gap:7px;overflow-y:auto;overscroll-behavior:contain}
+  .chips .chips-empty{color:var(--text2);font-size:13.5px;line-height:1.7;padding:2px 2px;opacity:.8}
+  .chip{display:inline-flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--border);border-radius:16px;padding:5px 11px;font-size:14px;line-height:1.5;cursor:grab}
+  .chip .zh{color:var(--text)}
+  .chip .en{color:var(--text2);font-size:12.5px}
+  .chip .x{color:var(--text2);font-weight:700;opacity:.7;cursor:pointer}
+  .chip{cursor:grab}
+  .chip:active{cursor:grabbing}
+  .chip.dragging{opacity:.5;border-style:dashed}
+  .chip .x:hover{opacity:1;color:var(--neg)}
+  .chip.pos{border-color:var(--pos)}
+  .chip.neg{border-color:var(--neg)}
+  .chip.raw{border-style:dashed;border-color:var(--accent)}
+  .chip.raw .en{color:var(--text)}
+  .chip.raw .raw-badge{color:var(--accent);font-size:11px;font-weight:700;line-height:1}
+  .chip .w{color:var(--accent);font-size:11px;font-weight:700;background:var(--accent-soft);border-radius:8px;padding:0 4px;line-height:1.4}
+  .w-edit{position:fixed;z-index:100;display:flex;align-items:center;gap:4px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:4px 6px;box-shadow:0 8px 24px rgba(0,0,0,.4)}
+  .w-edit .w-input{width:52px;background:var(--card2);border:1px solid var(--border);border-radius:5px;color:var(--text);font:12px Consolas,monospace;text-align:center;padding:2px;outline:none}
+  .w-edit .w-step{background:var(--card2);border:1px solid var(--border);color:var(--text);border-radius:5px;font-size:12px;width:22px;height:22px;line-height:1;cursor:pointer;font-weight:700}
+  .w-edit .w-step:hover{background:var(--accent-soft);color:var(--accent)}
+  .w-edit .w-reset{background:var(--card2);border:1px solid var(--border);color:var(--text);border-radius:5px;font-size:11px;padding:0 6px;height:22px;line-height:1;cursor:pointer}
+  .w-edit .w-reset:hover{background:var(--accent-soft);color:var(--accent)}
+  .btn{padding:6px 14px;border-radius:7px;font-size:13px;font-weight:600;border:1px solid transparent;transition:background .12s,border-color .12s,filter .12s,transform .06s}
+  .btn.primary{background:var(--accent);color:#fff}
+  .btn.primary:hover{filter:brightness(1.1)}
+  .btn.ghost{background:var(--accent-soft);color:var(--accent);border-color:rgba(79,142,247,.55)}
+  .btn.ghost:hover{border-color:var(--accent);background:rgba(79,142,247,.2)}
+  .btn:active{transform:translateY(1px)}
+  @media (max-width:860px){
+    .topbar{overflow-y:auto}
+    .workspace{grid-template-columns:1fr;flex:none}
+    .col{min-height:200px}
+  }
+
+  /* ===== 分类区（全部在弹窗内）===== */
+  /* 胶囊分类条：全部固定最左（不受滚动控制），其余横向滚动 */
+  .pills-row{flex:none;display:flex;align-items:center;gap:8px;padding:12px 16px 6px}
+  .pills-fixed{flex:none}
+  .pills-scroll{flex:1;min-width:0;display:flex;gap:7px;overflow-x:auto;padding-bottom:4px;align-items:center}
+  /* 二级标签行 */
+  .subs-row{flex:none;display:flex;gap:6px;overflow-x:auto;padding:2px 16px 8px}
+  .subs-row:empty{display:none}
+  .sub-pill{background:var(--card2);border:1px solid var(--border);border-radius:12px;padding:4px 12px;font-size:12px;line-height:1.5;white-space:nowrap;cursor:pointer;color:var(--text2);transition:background .12s,border-color .12s,color .12s}
+  .sub-pill:hover{border-color:var(--accent);color:var(--text)}
+  .sub-pill.active{background:var(--accent-soft);border-color:var(--accent);color:var(--accent);font-weight:600}
+  .pill{display:inline-flex;align-items:center;gap:7px;background:var(--card);border:1px solid var(--border);border-radius:18px;padding:6px 14px;font-size:13px;line-height:1.4;white-space:nowrap;cursor:pointer;color:var(--text);transition:background .12s,border-color .12s,transform .06s}
+  .pill .n{font-size:10.5px;color:var(--text2);background:var(--bg);border:1px solid var(--border);padding:0 6px;border-radius:9px;line-height:1.6}
+  .pill:hover{border-color:var(--accent);transform:translateY(-1px)}
+  .pill.active{background:var(--accent);border-color:var(--accent);color:#fff}
+  .pill.active .n{background:rgba(255,255,255,.22);border-color:transparent;color:#fff}
+  /* 常驻标签面板：占满剩余整页高度，内部滚动 */
+  .tagpanel{flex:1;min-height:0;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);overflow-y:auto;margin:4px 16px 16px}
+  .tagpanel .tags{display:flex;flex-wrap:wrap;gap:6px;padding:14px}
+  .tagpanel .empty{padding:20px;color:var(--text2);font-size:13px;text-align:center}
+  .tagpanel .tag{background:var(--card2);border:1px solid var(--border);border-radius:16px;padding:4px 11px;font-size:12.5px;line-height:1.5;cursor:pointer;display:inline-flex;align-items:center;gap:6px;transition:background .12s,border-color .12s,transform .06s}
+  .tagpanel .tag .zh{color:var(--text)}
+  .tagpanel .tag .en{color:var(--text2);font-size:11px}
+  .tagpanel .tag:hover{border-color:var(--accent);transform:translateY(-1px)}
+  .tagpanel .tag.sel{background:var(--pos-soft);border-color:var(--pos)}
+  .tagpanel .tag.sel .zh{color:var(--pos)}
+  .tagpanel .tag.neg-sel{background:var(--neg-soft);border-color:var(--neg)}
+  .tagpanel .tag.neg-sel .zh{color:var(--neg)}
+  .tagpanel .tag.hidden{display:none}
+  /* 加载按钮一律放进 .load-more-bar 里居中：按钮自己不带 margin，
+     否则 flex 行里的上下 margin 会把它相对同行文字顶偏 */
+  .tagpanel .load-more-bar{display:flex;justify-content:center;align-items:center;gap:10px;padding:10px 12px 16px;color:var(--text2);font-size:12.5px;line-height:1.6}
+  .tagpanel .load-more{display:inline-flex;align-items:center;justify-content:center;margin:0;padding:6px 18px;background:var(--card2);border:1px solid var(--border);border-radius:20px;color:var(--accent);font-size:12.5px;line-height:1.6;cursor:pointer;transition:background .12s,border-color .12s}
+  .tagpanel .load-more:hover{border-color:var(--accent);background:var(--accent-soft)}
+  /* 面板顶部说明行（如「全部 = 最常用的 1000 条」）；空状态另用 .empty */
+  .tagpanel .note{padding:12px 14px 0;color:var(--text2);font-size:12.5px;line-height:1.6}
+
+  /* ===== 标签库弹窗 ===== */
+  .mask{position:fixed;inset:0;z-index:200;display:none;align-items:center;justify-content:center;padding:3vh 3vw;background:rgba(5,8,14,.68);backdrop-filter:blur(4px)}
+  .mask.open{display:flex}
+  .modal{width:100%;max-width:1400px;height:100%;max-height:820px;display:flex;flex-direction:column;background:var(--bg);border:1px solid var(--border);border-radius:14px;box-shadow:0 26px 70px rgba(0,0,0,.55);overflow:hidden}
+  .modal .m-head{flex:none;display:flex;align-items:center;gap:10px;padding:12px 16px;border-bottom:1px solid var(--border);background:var(--card)}
+  .modal .m-head .t{font-size:15px;font-weight:650;white-space:nowrap;letter-spacing:.2px}
+  .modal .m-head .sel{font-size:11.5px;color:var(--accent);background:var(--accent-soft);border-radius:10px;padding:1px 9px;white-space:nowrap}
+  .modal .m-head .sel:empty{display:none}
+  .modal .m-head .hint{font-size:12px;color:var(--text2);margin-left:auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .modal .m-head .x{flex:none;width:30px;height:30px;display:flex;align-items:center;justify-content:center;font-size:19px;line-height:1;color:var(--text2);border-radius:8px;transition:background .12s,color .12s}
+  .modal .m-head .x:hover{background:var(--neg-soft);color:var(--neg)}
+  .modal .pills-row{padding:12px 16px 6px;align-items:flex-start}
+  .modal .pills-scroll{flex-wrap:wrap;overflow-x:visible;padding-bottom:0}
+  .modal .subs-row{padding:2px 16px 6px}
+  .modal .tagpanel{margin:4px 16px 14px}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="head">
+    <h1>AI 绘画提示词超市</h1>
+    <span class="meta" id="meta"></span>
+    <span class="spacer"></span>
+    <button class="btn ghost" id="outputLangBtn" onclick="toggleOutputLanguage()" title="只切换输出格式，保留标签、顺序、正负和权重">输出语言：English</button>
+    <button class="btn primary" id="openLibBtn" onclick="openLibrary()" title="打开标签库（分类浏览）">选择标签</button>
+  </div>
+
+  <!-- ① 全局标签搜索（直接加入提示词，不用开标签库） -->
+  <div class="search">
+    <input id="search" type="text" placeholder="🔍 全局搜索全量标签（中文或英文，如：大胸 / masturbation / 高马尾）" autocomplete="off">
+    <div class="results" id="searchRes"></div>
+  </div>
+
+  <!-- ② 工作区：左列上正面下负面提示词，右列同位置上正面下负面胶囊 -->
+  <div class="workspace">
+    <div class="col">
+      <div class="obox">
+        <label>正面提示词 <span class="cnt" id="posCnt">0</span>
+          <span class="acts">
+            <button class="mini danger" onclick="clearUnmatched(false)" title="清理正面区未识别到数据库的原文标签">清未识别</button>
+            <button class="mini" onclick="copyPos()" title="复制正面提示词">复制</button>
+          </span>
+        </label>
+        <textarea id="posOut" class="pos" placeholder="点击标签自动生成；也可直接粘贴已有提示词，自动识别成胶囊（匹配数据库显示中文，未匹配保留原文）…"></textarea>
+      </div>
+      <div class="obox">
+        <label>负面提示词 <span class="cnt" id="negCnt">0</span>
+          <span class="acts">
+            <button class="mini danger" onclick="clearUnmatched(true)" title="清理负面区未识别到数据库的原文标签">清未识别</button>
+            <button class="mini" onclick="copyNeg()" title="复制负面提示词">复制</button>
+          </span>
+        </label>
+        <textarea id="negOut" class="neg" placeholder="负面词分类的标签或手动翻转到负面的标签会进这里；同样支持粘贴识别…"></textarea>
+      </div>
+    </div>
+    <div class="col">
+      <div class="chipbox">
+        <label>正面标签 <span class="cnt" id="posChipCnt">0</span><span class="tip">拖动排序 · 右键设权重</span></label>
+        <div class="chips" id="posChips"></div>
+      </div>
+      <div class="chipbox">
+        <label>负面标签 <span class="cnt" id="negChipCnt">0</span><span class="tip">± 可翻回正面</span></label>
+        <div class="chips" id="negChips"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ③ 标签库弹窗：分类胶囊 + 二级分类 + 标签面板 -->
+<div class="mask" id="libMask" onclick="if(event.target===this)closeLibrary()">
+  <div class="modal" role="dialog" aria-modal="true" aria-label="标签库">
+    <div class="m-head">
+      <span class="t">标签库</span>
+      <span class="sel" id="libCount"></span>
+      <span class="hint">点击标签加入提示词，再次点击取消</span>
+      <button class="x" onclick="closeLibrary()" title="关闭（Esc）">×</button>
+    </div>
+    <div class="pills-row">
+      <div class="pills-fixed" id="allPill"></div>
+      <div class="pills-scroll" id="pills"></div>
+    </div>
+    <div class="subs-row" id="subsRow"></div>
+    <div class="tagpanel" id="tagpanel"></div>
+  </div>
+</div>
+
+<script>
+/* ============ 全量标签库（317,423 条，en→zh）============ */
+const FULL_TAGS = /*__FULL_TAGS__*/[];
+
+/* ============ 常用分类（人工精选 + 全量库自动归类）============ */
+const CURATED = {
+"质量词":["masterpiece","best quality","newest","safe","amazing quality","absurdres","highres","very detailed","detailed face","detailed background"],
+"年代/日期":["old","early","mid","recent","newest"],
+"角色数量":["1girl","1boy","2girls","solo","multiple people","2boys","3girls","1other","crowd"],
+"发色":["black hair","white hair","blonde hair","brown hair","red hair","blue hair","pink hair","purple hair","green hair","silver hair","orange hair","grey hair","multicolored hair"],
+"发型":["long hair","medium hair","short hair","ponytail","twintails","braid","twin braids","ahoge","bangs","wavy hair","straight hair","bun","side ponytail","low twintails","bob cut","sidelocks","curly hair","very long hair","messy hair","drill hair","hair down"],
+"眼睛 / 瞳色":["red eyes","blue eyes","green eyes","black eyes","yellow eyes","purple eyes","pink eyes","grey eyes","heterochromia","large eyes","half-closed eyes","teary eyes","glowing eyes","dilated pupils","slit pupils","sparkling eyes","eyelashes","eye contact"],
+"表情":["smile","grin","smirk","wink","tongue out","blush","embarrassed","innocent","confused","sad","crying","tears","happy","surprised","nervous","seductive","ahegao","expressionless","open mouth","panting","frown","closed eyes","side glance","moaning","lewd","slutty","flustered","denial","yandere","shy","tsundere","angry","laughing","pout"],
+"身材":["large breasts","huge breasts","gigantic breasts","small breasts","flat chest","slim","slender","voluptuous","narrow waist","thick thighs","pale skin","tan","dark skin","long legs","big ass","collarbone","hourglass figure","petite","curvy","muscular","medium breasts","wide hips","chubby","plump"],
+"服装":["school uniform","sailor uniform","swimsuit","bikini","maid","kimono","one-piece","skirt","stockings","thighhighs","pantyhose","off-shoulder","white shirt","t-shirt","suit","track suit","underwear","lace underwear","garter","nude","fully nude","topless","revealing clothes","short shorts","see-through","cleavage","hoodie","sweater","jacket","coat","dress","yukata","sarong","crossdressing","detached sleeves","gloves","heels","boots","school swimsuit","bunny suit","cheerleader","crop top","tank top","blazer","pleated skirt"],
+"姿势 / 动作":["standing","sitting","lying","kneeling","squatting","sitting on bed","lying on bed","prone","straddling","looking back","looking at viewer","looking away","raising hand","hands on hips","peace sign","selfie","heart hands","stretching","spread legs","leg up","hands behind back","hand over mouth","playing with hair","all fours","on all fours","arms up","crossed arms","reclining","spread arms","hand on chin","thumbs up","fingers crossed","arms behind head"],
+"场景 / 背景":["bedroom","bathroom","shower","bathtub","outdoors","beach","swimming pool","indoors","classroom","kitchen","couch","on bed","by window","night","sunset","day","sky","cherry blossoms","forest","city","street","grass","underwater","hot spring","onsen","balcony","rooftop","alley","library","office","park","snow","rain","mountain"],
+"画风 / 质感":["anime style","manhwa","webtoon","cel shading","semi-realistic","lineart","watercolor","cinematic","3d render","photorealistic","concept art","illustration","hand-drawn","dramatic lighting","soft lighting","depth of field","sketch","oil painting","pixel art","chibi","monochrome","high contrast","gradient background","anime coloring","thick outlines"],
+"来源 / 画质":["game cg","concept art","production art","promotional art","key visual","novel illustration","official wallpaper","artbook","magazine scan","anime screenshot","highres","absurdres","textless version","variant set","large variant set"],
+"媒材 / 手绘":["traditional media","watercolor (medium)","oil painting (medium)","marker (medium)","colored pencil (medium)","graphite (medium)","ink (medium)","photo (medium)","pixel art"],
+"NSFW 专属":["masturbation","penetration","cowgirl position","doggy style","fellatio","squirting","lactating","kissing","caressing","breast fondling","breast squeeze","exposed pussy","creampie","cum","licking","grinding","panties","lingerie","dildo","vibrator","sex toy","bondage","shibari","handjob","footjob","oral","anal","vaginal","orgasm","ejaculation","multiple orgasm","genital slit","spread pussy","clitoris","penis","testicles","nipples","areola","milk","breast milk"],
+"负面词":["lowres","low quality","worst quality","bad anatomy","bad hands","bad fingers","missing fingers","extra fingers","extra limbs","extra digits","deformed","distorted","blurry","jpeg artifacts","watermark","signature","username","text","mutation","poorly drawn face","poorly drawn hands","poorly drawn body","ugly","morbid","multiple breasts","amputee","malformed limbs","gross proportions","long neck","duplicate","monochrome","greyscale","censored","noise","grainy","logo"]
+};
+
+/* ============ 自动归类规则（en 关键词 → 分类名）============ */
+const AUTO = {
+"发色":[["black hair"],["white hair"],["blonde hair"],["brown hair"],["red hair"],["blue hair"],["pink hair"],["purple hair"],["green hair"],["silver hair"],["grey hair"],["orange hair"],["rainbow hair"],["multicolored hair"]],
+"发型":[["ponytail"],["twintails"],["braid"],["ahoge"],["bangs"],["bun"],["sidelocks"],["bob cut"],["straight hair"],["wavy hair"],["curly hair"],["hair down"],["hair over"],["hair between"],["hair clip"],["hair tie"],["drill hair"],["hair flaps"],["low twintails"],["side ponytail"]],
+"眼睛 / 瞳色":[["red eyes"],["blue eyes"],["green eyes"],["yellow eyes"],["purple eyes"],["pink eyes"],["grey eyes"],["black eyes"],["brown eyes"],["heterochromia"],["eye contact"],["eyelashes"],["eyeliner"],["closed eyes"],["half-closed eyes"],["dilated pupils"],["glowing eyes"]],
+"表情":[["smile"],["blush"],["expression"],["frown"],["tear"],["pout"],["smirk"],["wink"],["crying"],["laugh"],["angry"],["surprised"],["sad"],["happy"],["nervous"],["embarrassed"],["panting"],["moaning"],["seductive"],["ahegao"],["tongue out"],["grin"],["flustered"],["horny"],["lewd"],["cheerful"]],
+"身材":[["breast"],["chest"],["waist"],["thigh"],["hips"],["skin"],["muscular"],["slim"],["slender"],["petite"],["curvy"],["hourglass"],["voluptuous"],["chubby"],["plump"],["toned"],["figure"]],
+"服装":[["uniform"],["dress"],["shirt"],["skirt"],["underwear"],["bikini"],["swimsuit"],["kimono"],["coat"],["jacket"],["hoodie"],["sweater"],["maid"],["stockings"],["thighhighs"],["pantyhose"],["garter"],["lingerie"],["shoe"],["boot"],["glove"],["sock"],["scarf"],["hat"],["ribbon"],["bow"],["pants"],["shorts"],["jeans"],["blouse"],["vest"],["tie"],["belt"],["nude"],["naked"],["topless"],["bra"],["sailor"],["costume"],["armor"],["cape"],["robe"],["gown"],["apron"],["leggings"],["corset"],["bodysuit"]],
+"姿势 / 动作":[["standing"],["sitting"],["lying"],["kneeling"],["squatting"],["running"],["walking"],["jumping"],["dancing"],["straddling"],["leaning"],["reclining"],["bending"],["prone"],["all fours"],["spread legs"],["raising hand"],["pointing"],["crossed arms"],["holding"],["touching"],["carrying"],["lifting"],["looking"],["arms up"],["hands on"],["legs up"],["pose"]],
+"场景 / 背景":[["bedroom"],["bathroom"],["shower"],["bathtub"],["beach"],["pool"],["outdoors"],["indoors"],["classroom"],["kitchen"],["couch"],["window"],["night"],["sunset"],["sky"],["forest"],["city"],["street"],["grass"],["underwater"],["onsen"],["balcony"],["rooftop"],["room"],["building"],["ocean"],["sea"],["garden"],["park"],["snow"],["rain"],["mountain"],["alley"],["field"]],
+"画风 / 质感":[["anime style"],["manhwa"],["webtoon"],["lineart"],["cel shading"],["watercolor"],["sketch"],["cinematic"],["3d"],["photorealistic"],["concept art"],["illustration"],["painting"],["render"],["chibi"],["monochrome"],["greyscale"],["depth of field"],["lighting"],["oil painting"]],
+"NSFW 专属":[["sex"],["penetration"],["masturbation"],["nude"],["naked"],["pussy"],["penis"],["cum"],["squirt"],["fellatio"],["oral"],["cowgirl"],["doggy"],["missionary"],["anal"],["blowjob"],["creampie"],["lactating"],["milk"],["bondage"],["shibari"],["vibrator"],["dildo"],["sex toy"],["orgasm"],["ejaculation"],["clitoris"],["nipple"],["testicle"],["handjob"],["footjob"],["kissing"],["fondling"],["caressing"],["genital"],["threesome"],["spitroast"],["piledriver"],["impregnation"],["pregnancy"]]
+};
+/* 词边界匹配预编译：把关键词转成 \b(?:kw1|kw2)\b，避免 winchester→chest 这类子串误抓 */
+const AUTO_RE={};
+Object.keys(AUTO).forEach(c=>{
+  const flat=[].concat(...AUTO[c]);
+  AUTO_RE[c]=new RegExp('\\b(?:'+flat.map(k=>k.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')).join('|')+')\\b');
+});
+/* 分类排除：身材里剔除动作/接触/标记类，防止"hand_on_chest"这类混进身材 */
+const AUTO_EXCLUDE={
+  '身材': /(hand|arm|finger|foot|grab|hold|cover|pull|lift|push|spread|cross|stand|sit|lie|kneel|lean|raise|touch|carry|between|against|under|over|into|across|around|behind|beside|on_)/i
+};
+const NEG_WORDS = new Set(["lowres","low quality","worst quality","bad anatomy","bad hands","bad fingers","missing fingers","extra fingers","extra limbs","extra digits","deformed","distorted","blurry","jpeg artifacts","watermark","signature","username","text","mutation","poorly drawn face","poorly drawn hands","poorly drawn body","ugly","morbid","multiple breasts","amputee","malformed limbs","gross proportions","long neck","duplicate","monochrome","greyscale"]);
+
+/* 人工翻译补丁：精选词里数据库没有的，优先用这里 */
+const CURATED_ZH={
+'masterpiece':'杰作','best quality':'最佳质量','amazing quality':'惊人质量','very detailed':'细节丰富',
+'multiple people':'多人','silver hair':'银发','bangs':'刘海','bun':'发髻','large eyes':'大眼睛','teary eyes':'泪眼',
+'wink':'眨眼','innocent':'无辜','seductive':'勾引','panting':'喘气','side glance':'斜视','lewd':'淫荡','slutty':'淫乱','flustered':'慌乱','denial':'否认','yandere':'病娇',
+'slim':'苗条','slender':'纤细','voluptuous':'丰满','big ass':'翘臀','hourglass figure':'沙漏身材','dollchestra':'Dollchestra(企划)',
+'sailor uniform':'水手服','one-piece':'连衣裙','stockings':'丝袜','off-shoulder':'露肩','lace underwear':'蕾丝内衣','garter':'吊带袜','fully nude':'全裸','topless':'露胸','see-through':'透视装','heels':'高跟鞋',
+'sitting on bed':'坐床上','lying on bed':'躺床上','prone':'俯卧','raising hand':'举手','hands on hips':'叉腰','peace sign':'剪刀手','hands behind back':'背手','hand over mouth':'捂嘴','on all fours':'四肢着地',
+'swimming pool':'游泳池','by window':'窗边','hot spring':'温泉',
+'anime style':'动漫风','manhwa':'韩漫风','cel shading':'赛璐璐','semi-realistic':'半写实','watercolor':'水彩','cinematic':'电影感','3d render':'3D渲染','illustration':'插画','hand-drawn':'手绘','dramatic lighting':'戏剧性打光','soft lighting':'柔光','oil painting':'油画',
+'penetration':'插入','doggy style':'后入式','squirting':'潮吹','lactating':'泌乳','kissing':'接吻','caressing':'爱抚','breast fondling':'揉胸','breast squeeze':'挤胸','exposed pussy':'露出阴部','creampie':'内射','multiple orgasm':'多重高潮','genital slit':'阴缝','areola':'乳晕','breast milk':'乳汁',
+'low quality':'低质量','worst quality':'最差质量','bad fingers':'坏手指','missing fingers':'缺手指','extra fingers':'多余手指','extra limbs':'多余肢体','distorted':'扭曲','text':'文字','poorly drawn face':'脸部崩坏','poorly drawn hands':'手部崩坏','poorly drawn body':'身体崩坏','ugly':'丑','morbid':'病态','multiple breasts':'多乳房','malformed limbs':'畸形肢体','gross proportions':'比例失调',
+'newest':'最新','safe':'安全(全年龄)','early':'早期','mid':'中期','recent':'近现代','old':'旧作','detailed face':'精细脸部','detailed background':'精细背景',
+'chubby':'微胖','bunny suit':'兔女郎','hand on chin':'托下巴','fingers crossed':'交叉手指','noise':'噪点','grainy':'颗粒感'
+};
+/* 漏进精选分类的专名（无括号的歌名/乐队/武器/企划）*/
+const AUTO_SKIP=new Set(['dollchestra','snapchat','gibson_flying_v','raise_a_suilen','snow_halation','knightmare_frame','sparkling_daydream','happy_party_train','true_velocity_rm338','windows_media_player','umisea','team_ascella','milkor_mgl','fate/accel_zero_order','omnitrix','strawpage','ragfes','supportasse','aneros']);
+/* 强制分类：数据库标错类的专名 → 归到正确分类 */
+const FORCE_CAT={'fate/accel_zero_order':'版权/作品'};
+
+/* ============ 二级标签（细分）============ */
+const SUBS = {
+'服装':{
+  '全部':null,
+  '上衣':['shirt','blouse','jacket','sweater','hoodie','coat','vest','tank','t-shirt','top','cardigan'],
+  '裙装':['skirt','dress','gown','one-piece','pinafore','tube top'],
+  '下装':['pants','shorts','jeans','trousers','leggings','culottes','cargo pants'],
+  '内衣/袜':['bra','underwear','lingerie','panties','garter','bikini','swimsuit','stockings','thighhigh','pantyhose','socks','bodysuit','corset','panties'],
+  '鞋/配饰':['shoe','boot','heel','sandal','slipper','hat','cap','ribbon','bow','scarf','glove','belt','necklace','earring','glasses','crown','tie','brooch'],
+  '制服/民族':['uniform','sailor','maid','kimono','yukata','suit','costume','armor','hanten','hakama'],
+  '裸露/透视':['nude','naked','topless','see-through','revealing','cleavage','strip','shirtless','panties only','bottomless']
+},
+'姿势 / 动作':{
+  '全部':null,
+  '站/坐/躺':['standing','sitting','lying','reclining','kneeling','squatting','prone','crouching','supine'],
+  '手部':['raising hand','hands on hips','peace sign','heart hands','hand over mouth','crossed arms','pointing','holding','carrying','thumbs up','hand on'],
+  '腿部':['spread legs','leg up','crossed legs','straddling','legs apart','sitting on','knees up','wide stance'],
+  '视线/转身':['looking at viewer','looking back','looking away','turning','looking down','looking up','sideways','glancing']
+},
+'NSFW 专属':{
+  '全部':null,
+  '自慰':['masturbat'],
+  '性交':['penetrat','vaginal','intercourse','fuck','threesome','spitroast','gangbang','double penetration','sextoy'],
+  '口交':['fellatio','oral','blowjob','deep throat','cum in mouth','irrumatio','cunnilingus'],
+  '体液/高潮':['cum','squirt','ejaculat','orgasm','creampie','piss','lactat','milk','drool','drooling','saliva'],
+  '道具/束缚':['dildo','vibrator','sex toy','bondage','shibari','handcuff','collar','anal beads','anal plug','paddle','chastity','rope','gag','nipple clamps'],
+  '体位':['cowgirl','doggy','missionary','reverse cowgirl','spooning','piledriver','kneeling','face sitting','lapsitting','standing sex']
+},
+'身材':{
+  '全部':null,
+  '胸部':['breast','nipple','cleavage','chest','areola','tits'],
+  '体型':['slim','slender','voluptuous','petite','curvy','hourglass','thick','skinny','muscular','chubby','plump'],
+  '皮肤':['pale skin','tan','dark skin','skin','fair skin'],
+  '部位':['waist','thigh','hips','legs','ass','butt','collarbone','shoulder','abdomen','belly','armpit','feet','hands','throat']
+},
+'场景 / 背景':{
+  '全部':null,
+  '室内':['bedroom','bathroom','shower','bathtub','kitchen','classroom','room','indoors','onsen','hotel','toilet','garage','balcony','library','office'],
+  '室外':['outdoors','beach','forest','city','street','garden','park','sky','ocean','sea','snow','rain','underwater','mountain','rooftop','alley','field'],
+  '时间/光线':['night','sunset','sunrise','day','dawn','morning','evening','dusk','moonlight','sunlight','rainbow']
+},
+'表情':{
+  '全部':null,
+  '喜悦':['smile','grin','happy','wink','laugh','cheerful','delighted','giggle'],
+  '害羞/脸红':['blush','embarrassed','flustered','dodge','denial','shy','flushed'],
+  '负面':['sad','crying','tears','frown','angry','pout','nervous','scared','sweat','worried','annoyed','disappointed'],
+  '勾引/兴奋':['seductive','ahegao','panting','moaning','lewd','slutty','tongue out','horny','orgasm','gasm','leering']
+},
+'发型':{
+  '全部':null,
+  '马尾/辫/髻':['ponytail','twintails','braid','bun','chignon','side ponytail','twin braids','low twintails','hair up'],
+  '长度':['long hair','short hair','medium hair','very long hair','shoulder-length','bob cut','hair down','short'],
+  '刘海/特征':['bangs','ahoge','sidelocks','wavy','straight','curly','blunt bangs','hair between eyes','drill hair','hair flaps','messy hair']
+},
+'眼睛 / 瞳色':{
+  '全部':null,
+  '瞳色':['red eyes','blue eyes','green eyes','yellow eyes','purple eyes','pink eyes','grey eyes','black eyes','brown eyes','heterochromia','orange eyes'],
+  '眼型/特征':['large eyes','half-closed eyes','teary','closed eyes','dilated','eyelashes','eyeliner','glowing eyes','slit pupils','cross-eyed','eye contact','sparkling eyes']
+}
+};
+
+/* ============ 构建分类 ============ */
+// tagKey is the only identity: case/underscores/repeated whitespace are equivalent.
+const tagKey=s=>String(s).trim().toLowerCase().replace(/[_\s]+/g,' ');
+const textKey=s=>String(s).trim().toLowerCase().replace(/\s+/g,' ');
+const fullMap = new Map(FULL_TAGS.map(row=>[tagKey(row[0]),row]));
+const catMap = {};
+const fullCat = {};
+const zhFallback=en=>CURATED_ZH[en]||fullMap.get(tagKey(en))?.[1]||en;
+const isNeg=en=>NEG_WORDS.has(tagKey(en));
+function buildCats(){
+  const GEN={}, SPEC={'角色':[], '画师':[], '版权/作品':[]};
+  Object.keys(CURATED).forEach(c=>catMap[c]=[]);
+  Object.keys(AUTO).forEach(c=>GEN[c]=[]);
+  // 单次遍历全库，按分类收集
+  FULL_TAGS.forEach(([name,cn,cat,pc])=>{
+    const forceCat=FORCE_CAT[name];
+    if(forceCat){ SPEC[forceCat].push([name,cn,9999999]); return; } // 强制分类到正确分类
+    if(cat===0){
+      if(/[(!]/.test(name)) return;   // 过滤歌名/乐队/企划等专名，不塞进精选分类
+      if(AUTO_SKIP.has(name)) return; // 无括号但仍是专名的漏网之鱼
+      const sp=name.replace(/_/g,' ');
+      for(const c of Object.keys(AUTO)){
+        const ex=AUTO_EXCLUDE[c];
+        if(ex && ex.test(name)) continue;
+        if(AUTO_RE[c].test(sp)) GEN[c].push([name,cn,pc]);
+      }
+    } else if(cat===4) SPEC['角色'].push([name,cn,pc]);
+      else if(cat===1) SPEC['画师'].push([name,cn,pc]);
+      else if(cat===3) SPEC['版权/作品'].push([name,cn,pc]);
+  });
+  // 1) 精选（翻译优先：人工补丁 > 数据库 > 英文原文）
+  Object.entries(CURATED).forEach(([c,list])=>{
+    list.forEach(en=>{
+      const k=tagKey(en);
+      const has=fullMap.has(k);
+      catMap[c].push({en: has?fullMap.get(k)[0]:en, zh: CURATED_ZH[en] || (has?fullMap.get(k)[1]:null) || en});
+    });
+  });
+  // 2) General 自动归类：按热度排序、去重、每类上限（完整版存 fullCat）
+  const CAP=2500;
+  Object.entries(GEN).forEach(([c,pool])=>{
+    const have=new Set(catMap[c].map(x=>tagKey(x.en)));
+    pool.sort((a,b)=>b[2]-a[2]);
+    pool.forEach(([name,cn])=>{ const k=tagKey(name); if(!have.has(k)){ catMap[c].push({en:name,zh:cn}); have.add(k); } });
+    fullCat[c]=catMap[c].slice();          // 完整：精选 + 全部自动归类
+    if(catMap[c].length>CAP) catMap[c]=catMap[c].slice(0,CAP);
+  });
+  // 3) 角色/画师/版权（按热度取前 N；完整版存 fullCat）
+  const SPECCAP={'角色':5000,'画师':3000,'版权/作品':3000};
+  Object.entries(SPEC).forEach(([c,pool])=>{
+    pool.sort((a,b)=>b[2]-a[2]);
+    fullCat[c]=pool.map(([name,cn])=>({en:name,zh:cn}));
+    catMap[c]=fullCat[c].slice(0,SPECCAP[c]);
+  });
+  // cat=5 的 meta（分辨率 / 评论 / 来源 / 差分 / 媒材等）共 418 条，绝大多数对出图无用，
+  // 不再整类收进面板：只保留 CURATED 里手工点名的那些（「来源 / 画质」「媒材 / 手绘」），
+  // 其余仅能通过全局搜索找到。
+  Object.keys(catMap).forEach(c=>{ if(!(c in fullCat)) fullCat[c]=catMap[c].slice(); });  // 精选类等：完整=当前
+  // 4) 全部：所有分类合并去重，按热度取前 1000 条最常用
+  ALL_TAGS=[];
+  { const seen=new Set();
+    Object.keys(catMap).forEach(c=>{
+      catMap[c].forEach(t=>{
+        if(!seen.has(t.en)){ seen.add(t.en); ALL_TAGS.push({en:t.en,zh:t.zh,pc:(fullMap.get(tagKey(t.en))?.[3]||0)}); }
+      });
+    });
+    ALL_TAGS.sort((a,b)=>b.pc-a.pc);
+    ALL_TAGS=ALL_TAGS.slice(0,1000);
+  }
+  // 标签索引不在这里建：首屏同步遍历 31.7 万条约占 1.7s，改为空闲/首次交互时惰性构建。
+}
+
+/* ============ 标签索引（惰性构建）============
+   打开页面只做分类，匹配表 / 中文反查表 / 搜索索引推迟到空闲时或首次交互时构建。 */
+let matchMap=new Map();  // 回填识别匹配表：归一化键 -> {en,zh,zhRaw,pc}
+let zhMatchMap=new Map(), punctuationAliases=new Map();
+let searchIndex=[];
+let tagIndexReady=false, zhIndexReady=false, searchIndexReady=false;
+
+function buildTagIndex(){
+  if(tagIndexReady) return matchMap;
+  tagIndexReady=true;
+  matchMap=new Map();
+  const patches=new Map(Object.entries(CURATED_ZH).map(([en,zh])=>[tagKey(en),zh]));
+  const add=(en,zh,pc=0,zhRaw=null)=>{
+    const k=tagKey(en);
+    if(matchMap.has(k)) return;
+    matchMap.set(k,{en,zh:patches.get(k)||zh||en,pc,zhRaw});
+  };
+  // One pass over the library: canonical English name, patched display name,
+  // raw library translation (for backfill aliases) and popularity.
+  for(let i=0;i<FULL_TAGS.length;i++){
+    const row=FULL_TAGS[i];
+    add(row[0],row[1],row[3],row[1]);
+  }
+  Object.entries(CURATED_ZH).forEach(([en,zh])=>add(en,zh));
+  Object.values(CURATED).flat().forEach(en=>add(en,zhFallback(en)));
+  return matchMap;
+}
+function ensureTagIndex(){ return tagIndexReady?matchMap:buildTagIndex(); }
+
+function addZhAlias(label,item){
+  const k=textKey(label); if(!k) return;
+  let list=zhMatchMap.get(k);
+  if(!list){ list=[]; zhMatchMap.set(k,list); }
+  if(!list.includes(item)) list.push(item);
+}
+function buildZhIndex(){
+  if(zhIndexReady) return zhMatchMap;
+  ensureTagIndex();
+  zhIndexReady=true;
+  zhMatchMap=new Map(); punctuationAliases=new Map();
+  matchMap.forEach(item=>{
+    addZhAlias(item.zhRaw?item.zhRaw:item.zh,item);
+    if(item.zhRaw&&item.zh!==item.zhRaw) addZhAlias(item.zh,item);
+  });
+  const rank=(a,b)=>b.pc-a.pc||(tagKey(a.en)<tagKey(b.en)?-1:tagKey(a.en)>tagKey(b.en)?1:0);
+  zhMatchMap.forEach(list=>{ if(list.length>1) list.sort(rank); });
+  // Only names containing separators need longest-name scanning. No full-library trie.
+  const addPunctuation=label=>{
+    if(!/[,，;；\n]/.test(label)) return;
+    const k=textKey(label), first=k[0];
+    if(!punctuationAliases.has(first)) punctuationAliases.set(first,new Set());
+    punctuationAliases.get(first).add(k);
+  };
+  zhMatchMap.forEach((_,label)=>addPunctuation(label));
+  matchMap.forEach(item=>addPunctuation(item.en.replace(/_/g,' ')));
+  punctuationAliases.forEach((labels,first)=>punctuationAliases.set(first,[...labels].sort((a,b)=>b.length-a.length||(a<b?-1:1))));
+  return zhMatchMap;
+}
+function ensureZhIndex(){ return zhIndexReady?zhMatchMap:buildZhIndex(); }
+
+function buildSearchIndex(){
+  if(searchIndexReady) return searchIndex;
+  ensureTagIndex();
+  searchIndexReady=true;
+  searchIndex=new Array(matchMap.size);
+  let i=0;
+  matchMap.forEach(item=>{
+    if(!item.search) item.search=tagKey(item.en)+'\0'+textKey(item.zh)+'\0'+textKey(item.zhRaw||'');
+    searchIndex[i++]=item;
+  });
+  return searchIndex;
+}
+
+/* ============ 渲染 ============ */
+const allPillEl=document.getElementById('allPill');
+const pillsEl=document.getElementById('pills');
+const panelEl=document.getElementById('tagpanel');
+const posOut=document.getElementById('posOut'), negOut=document.getElementById('negOut');
+const posChips=document.getElementById('posChips'), negChips=document.getElementById('negChips');
+let selected=new Map();  // tagKey (or raw:literal) -> {en,zh,neg,w,raw?}; insertion order is prompt order.
+let outputLanguage='en';   // 默认英文输出，不做持久化
+let lastFormatted={pos:'',neg:''};
+let activeCat='__全部__';   // 默认显示「全部」
+let activeSub='全部';
+let catFull=false;        // 当前分类是否完整加载（非精选封顶）
+const CHUNK=4000;         // 完整加载时每批渲染的标签数
+let ALL_TAGS=[];
+const subsEl=document.getElementById('subsRow');
+
+function pillEl(label,count,active,onclick){
+  const p=document.createElement('button');
+  p.className='pill'+(active?' active':'');
+  const nm=document.createElement('span'); nm.className='nm'; nm.textContent=label;
+  p.appendChild(nm);
+  if(count!=null){
+    const n=document.createElement('span'); n.className='n'; n.textContent=count.toLocaleString();
+    p.appendChild(n);
+  }
+  p.onclick=onclick;
+  return p;
+}
+function renderPills(){
+  allPillEl.innerHTML=''; pillsEl.innerHTML='';
+  // "全部"胶囊（固定最左）
+  allPillEl.appendChild(pillEl('全部',ALL_TAGS.length,activeCat==='__全部__',
+    ()=>{ activeCat='__全部__'; activeSub='全部'; catFull=false; renderPills(); renderSubs(); renderPanel(); }));
+  Object.keys(catMap).forEach(c=>{
+    const count=(fullCat[c]||catMap[c]||[]).length;
+    pillsEl.appendChild(pillEl(c,count,c===activeCat,
+      ()=>{ activeCat=c; activeSub='全部'; catFull=false; renderPills(); renderSubs(); renderPanel(); }));
+  });
+}
+function renderSubs(){
+  subsEl.innerHTML='';
+  const subs=SUBS[activeCat];
+  if(!subs) return;
+  Object.keys(subs).forEach(s=>{
+    const b=document.createElement('button');
+    b.className='sub-pill'+(s===activeSub?' active':'');
+    b.textContent=s;
+    b.onclick=()=>{ activeSub=s; catFull=false; renderSubs(); renderPanel(); };
+    subsEl.appendChild(b);
+  });
+}
+/* 只有这三类是上万条的专名库，默认封顶显示，其余按需加载；其它分类条数可控，直接全量渲染 */
+const SPEC_CATS=new Set(['角色','画师','版权/作品']);
+function loadBar(...children){
+  const bar=document.createElement('div');
+  bar.className='load-more-bar';
+  children.forEach(c=>bar.appendChild(c));
+  return bar;
+}
+function loadBtn(text,onclick){
+  const b=document.createElement('button');
+  b.className='load-more';
+  b.textContent=text;
+  b.onclick=onclick;
+  return b;
+}
+function renderPanel(){
+  panelEl.innerHTML='';
+  const isAll=activeCat==='__全部__';
+  const subs=SUBS[activeCat];
+  const filterFn=t=>{
+    if(subs && subs[activeSub]){
+      const kws=subs[activeSub], sp=t.en.replace(/_/g,' ');
+      if(!kws.some(k=>sp.includes(k))) return false;
+    }
+    return true;
+  };
+  const isSpec=SPEC_CATS.has(activeCat);
+  // 完整列表（当前二级过滤后）
+  const fullItems=(isAll?ALL_TAGS:(fullCat[activeCat]||[])).filter(filterFn);
+  // 实际渲染列表：专名类先用封顶的精选，其余分类与「完整列表」完全一致
+  const items=isSpec?(catMap[activeCat]||[]).filter(filterFn):fullItems;
+  if(!fullItems.length){
+    panelEl.innerHTML='<div class="empty">这个分类下暂无标签，换个分类看看</div>';
+    return;
+  }
+  if(isAll){
+    const note=document.createElement('div');
+    note.className='note';
+    note.textContent='「全部」= 最常用的 1000 条；完整 '+FULL_TAGS.length.toLocaleString()+' 条请用页面上的搜索框查找';
+    panelEl.appendChild(note);
+  }
+  const box=document.createElement('div');
+  box.className='tags';
+  panelEl.appendChild(box);
+  const catLabel=isAll?'全部':activeCat;
+  if(isSpec && catFull){
+    // 专名类完整加载：分块追加，避免一次渲染十万级标签卡死
+    let idx=0;
+    const step=()=>{
+      fullItems.slice(idx,idx+CHUNK).forEach(t=>box.appendChild(makeTag(t,catLabel)));
+      idx=Math.min(idx+CHUNK, fullItems.length);
+      if(idx<fullItems.length){
+        const bar=loadBar();
+        bar.appendChild(loadBtn('继续加载…（'+idx.toLocaleString()+' / '+fullItems.length.toLocaleString()+'）',()=>{ bar.remove(); step(); refresh(); }));
+        panelEl.appendChild(bar);
+      } else {
+        const close=loadBtn('收起至精选',()=>{ catFull=false; renderPanel(); refresh(); });
+        const bar=loadBar(document.createTextNode('已显示全部 '+fullItems.length.toLocaleString()+' 条'),close);
+        panelEl.appendChild(bar);
+      }
+    };
+    step();
+  } else {
+    items.forEach(t=>box.appendChild(makeTag(t,catLabel)));
+    if(isSpec && fullItems.length>items.length){
+      panelEl.appendChild(loadBar(loadBtn('加载全部 '+fullItems.length.toLocaleString()+' 条',()=>{ catFull=true; renderPanel(); refresh(); })));
+    }
+  }
+}
+function makeTag(t,cat){
+  const b=document.createElement('span');
+  b.className='tag'+tagStateClass(t.en);
+  b.dataset.en=t.en; b.dataset.cat=cat;
+  b.innerHTML=`<span class="zh">${escHtml(labelFor(t.en,t.zh))}</span><span class="en">${escHtml(t.en.replace(/_/g,' '))}</span>`;
+  b.onclick=e=>{
+    e.stopPropagation();
+    const kk=tagKey(t.en);
+    if(selected.has(kk)) selected.delete(kk); else selected.set(kk,{en:t.en,zh:labelFor(t.en,t.zh),neg:isNeg(t.en)});
+    refresh();
+  };
+  return b;
+}
+function entryKey(s){ return s.raw||!s.zh?'raw:'+s.en:tagKey(s.en); }
+function labelFor(en,fallback){
+  // 索引还没建好时先用调用方给的展示名（分类里的 zh），别为首屏渲染强行建 31.7 万条的表。
+  if(tagIndexReady){ const item=matchMap.get(tagKey(en)); if(item) return item.zh; }
+  if(fallback) return fallback;
+  return ensureTagIndex().get(tagKey(en))?.zh||zhFallback(en);
+}
+function tagStateClass(en){
+  const state=selected.get(tagKey(en));
+  return state?(state.neg?' neg-sel':' sel'):'';
+}
+// Danbooru/WebUI 把裸括号当成权重语法，所以标签名里的括号必须写成 \( \)，
+// 回填时再把 \( \) \\ 还原成真实字符。
+function escapePromptLabel(label){ return String(label).replace(/[\\()]/g,'\\$&'); }
+function unescapePromptLabel(label){ return String(label).replace(/\\([\\()])/g,'$1'); }
+function quoteLabel(label,escapeParens){
+  // Quoted labels disambiguate embedded separators and parser syntax on round trips.
+  let depth=0, unbalanced=false;
+  for(const ch of label){
+    if(ch==='(') depth++;
+    else if(ch===')'&&--depth<0) unbalanced=true;
+  }
+  if(escapeParens){
+    // 已知标签名：括号/反斜杠用反斜杠转义即可，只有分隔符和双引号才需要引号保护。
+    const text=escapePromptLabel(label);
+    return /[,，;；\n"]/.test(label)?JSON.stringify(text):text;
+  }
+  return /[,，;；\n"\\]/.test(label)||depth!==0||unbalanced?JSON.stringify(label):label;
+}
+function formatOutputs(){
+  const fmt=s=>{
+    const label=s.raw||!s.zh?s.en:(outputLanguage==='zh'?labelFor(s.en,s.zh):s.en.replace(/_/g,' '));
+    const text=quoteLabel(label,!s.raw&&!!s.zh);
+    return s.w!=null&&s.w!==1?`(${text}:${s.w})`:text;
+  };
+  const entries=[...selected.values()], pos=entries.filter(s=>!s.neg), neg=entries.filter(s=>s.neg);
+  lastFormatted={pos:pos.map(fmt).join(', '),neg:neg.map(fmt).join(', ')};
+  posOut.value=lastFormatted.pos; negOut.value=lastFormatted.neg;
+  document.getElementById('posCnt').textContent=pos.length;
+  document.getElementById('negCnt').textContent=neg.length;
+  document.getElementById('posChipCnt').textContent=pos.length;
+  document.getElementById('negChipCnt').textContent=neg.length;
+  document.documentElement.dataset.outputLang=outputLanguage;
+  const b=document.getElementById('outputLangBtn');
+  b.textContent='输出语言：'+(outputLanguage==='zh'?'中文':'English');
+  b.setAttribute('aria-label',b.textContent+'，点击切换');
+}
+function toggleOutputLanguage(){
+  outputLanguage=outputLanguage==='zh'?'en':'zh';
+  formatOutputs(); // Never parse/rebuild selected or chips here.
+}
+function refresh(){
+  document.querySelectorAll('.tagpanel .tag, .search .r-tag').forEach(el=>{
+    el.classList.remove('sel','neg-sel');
+    const state=selected.get(tagKey(el.dataset.en));
+    if(state) el.classList.add(state.neg?'neg-sel':'sel');
+  });
+  formatOutputs();
+  renderChips(posChips,[...selected.values()].filter(s=>!s.neg),false);
+  renderChips(negChips,[...selected.values()].filter(s=>s.neg),true);
+  updateLibCount();
+}
+
+/* ===== 标签库弹窗 ===== */
+const libMask=document.getElementById('libMask');
+const openLibBtn=document.getElementById('openLibBtn'), libCount=document.getElementById('libCount');
+function updateLibCount(){
+  const n=selected.size;
+  libCount.textContent=n?'已选 '+n+' 个':'';
+  openLibBtn.textContent=n?'选择标签 · '+n:'选择标签';
+}
+function openLibrary(){
+  libMask.classList.add('open');
+  updateLibCount();
+  const cur=panelEl.querySelector('.tag.sel, .tag.neg-sel');
+  if(cur) cur.scrollIntoView({block:'nearest'});
+}
+function closeLibrary(){ libMask.classList.remove('open'); }
+document.addEventListener('keydown',e=>{
+  if(e.key==='Escape'&&libMask.classList.contains('open')&&!weightEditor) closeLibrary();
+});
+
+let dragKey=null;  // 正在拖动的 chip 的 lowercase en
+function renderChips(el,list,isNeg){
+  el.innerHTML='';
+  if(!list.length){
+    const tip=document.createElement('div');
+    tip.className='chips-empty';
+    tip.textContent=isNeg?'暂无负面标签 · 负面词分类或点 ± 翻过来的标签会出现在这里':'暂无标签 · 点右上角「选择标签」或在上方搜索框里挑';
+    el.appendChild(tip);
+    return;
+  }
+  list.forEach(s=>{
+    const raw=s.raw||!s.zh;
+    const c=document.createElement('span');
+    c.className='chip'+(isNeg?' neg':' pos')+(raw?' raw':'');
+    const wBadge=s.w!=null&&s.w!==1?`<span class="w" title="权重 ${s.w}">${s.w}</span>`:'';
+    c.innerHTML=raw
+      ?`<span class="x" title="点击切换正负">±</span><span class="en">${escHtml(s.en)}</span>${wBadge}<span class="raw-badge" title="未匹配到数据库，保留原文">?</span><span class="x del" title="删除该提示词">×</span>`
+      :`<span class="x" title="点击切换正负">±</span><span class="zh">${escHtml(labelFor(s.en,s.zh))}</span><span class="en">${escHtml(s.en.replace(/_/g,' '))}</span>${wBadge}<span class="x del" title="删除该提示词">×</span>`;
+    c.draggable=true;
+    if(s.zh) c.oncontextmenu=e=>{ e.preventDefault(); showWeightEditor(c,s); };
+    c.querySelector('.x:not(.del)').onclick=e=>{ e.stopPropagation(); const s2=selected.get(entryKey(s)); if(s2){ s2.neg=!s2.neg; refresh(); } };
+    c.querySelector('.x.del').onclick=e=>{ e.stopPropagation(); selected.delete(entryKey(s)); refresh(); };
+    c.addEventListener('dragstart',e=>{ dragKey=entryKey(s); e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',s.en); c.classList.add('dragging'); });
+    c.addEventListener('dragend',()=>{ dragKey=null; el.querySelectorAll('.chip.dragging').forEach(x=>x.classList.remove('dragging')); });
+    c.addEventListener('dragover',e=>{ e.preventDefault(); e.dataTransfer.dropEffect='move'; });
+    c.addEventListener('drop',e=>{ e.preventDefault(); reorderChips(entryKey(s),isNeg); });
+    el.appendChild(c);
+  });
+}
+let weightEditor=null;
+function showWeightEditor(chip,s){
+  if(weightEditor){ weightEditor.remove(); weightEditor=null; }
+  const ed=document.createElement('div');
+  ed.className='w-edit';
+  const input=document.createElement('input');
+  input.type='text'; input.className='w-input'; input.value=String(s.w??1); input.title='只认阿拉伯数字，Enter 确认';
+  const dec=document.createElement('button'); dec.className='w-step'; dec.textContent='−';
+  const inc=document.createElement('button'); inc.className='w-step'; inc.textContent='+';
+  const rst=document.createElement('button'); rst.className='w-reset'; rst.textContent='重置';
+  input.oninput=()=>{ input.value=input.value.replace(/[^\d.]/g,''); };
+  const step=d=>{ const n=parseFloat(input.value), v=Number.isFinite(n)?n:1; input.value=String(Math.round((v+d)*100)/100); };
+  dec.onclick=()=>step(-0.1);
+  inc.onclick=()=>step(0.1);
+  rst.onclick=()=>{ input.value='1'; apply(); };
+  const apply=()=>{
+    const v=input.value.trim();
+    if(!/^\d+(\.\d+)?$/.test(v)||!Number.isFinite(Number(v))){ flash('✗ 权重只认阿拉伯数字'); return; }
+    const n=parseFloat(v);
+    s.w=(n===1)?null:Math.round(n*100)/100;   // 权重 1 视为无权重，不显示
+    refresh();
+    if(weightEditor){ weightEditor.remove(); weightEditor=null; }
+  };
+  input.onkeydown=e=>{
+    if(e.key==='Enter'){ e.preventDefault(); apply(); }
+    else if(e.key==='Escape'){ ed.remove(); weightEditor=null; }
+  };
+  ed.append(dec,input,inc,rst);
+  const r=chip.getBoundingClientRect();
+  ed.style.left=Math.max(4,Math.min(r.left,innerWidth-210))+'px';
+  ed.style.top=(r.bottom+4)+'px';
+  document.body.appendChild(ed);
+  input.focus(); input.select();
+  weightEditor=ed;
+  ed.__apply=apply;
+}
+document.addEventListener('click',e=>{
+  if(weightEditor && !e.target.closest('.w-edit')){ const f=weightEditor.__apply; if(f) f(); }
+});
+function reorderChips(targetKey,isNeg){
+  if(!dragKey||dragKey===targetKey) return;
+  const keys=[...selected.keys()];
+  const posKeys=keys.filter(k=>!selected.get(k).neg);
+  const negKeys=keys.filter(k=>selected.get(k).neg);
+  const src=isNeg?negKeys:posKeys;
+  const from=src.indexOf(dragKey), to=src.indexOf(targetKey);
+  if(from<0||to<0) return;
+  src.splice(from,1); src.splice(to,0,dragKey);
+  const newMap=new Map();
+  posKeys.forEach(k=>newMap.set(k,selected.get(k)));
+  negKeys.forEach(k=>newMap.set(k,selected.get(k)));
+  selected=newMap;
+  refresh();
+}
+
+/* ============ 提示词回填识别：粘贴/输入 → 自动识别成胶囊 ============ */
+const escHtml=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const separator=ch=>/[,，;；\n]/.test(ch);
+function resolveTag(text){
+  ensureZhIndex();
+  const plain=unescapePromptLabel(text);
+  const en=matchMap.get(tagKey(plain)); if(en) return en;
+  const candidates=zhMatchMap.get(textKey(plain));
+  if(!candidates) return null;
+  // Selected candidate first; ties follow popularity then stable English tagKey.
+  return candidates.find(item=>selected.has(tagKey(item.en)))||candidates[0];
+}
+function parsePromptTokens(text){
+  ensureZhIndex();  // 标点别名表随中文索引一起惰性构建
+  const out=[];
+  let start=0, depth=0, quoted=false, escaped=false, atStart=true;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(quoted){
+      if(escaped) escaped=false;
+      else if(ch==='\\') escaped=true;
+      else if(ch==='"') quoted=false;
+      continue;
+    }
+    // 反斜杠转义：\( 和 \) 是标签名里的字面括号，不参与括号深度/权重判定。
+    if(escaped){ escaped=false; atStart=false; continue; }
+    if(ch==='\\'){ escaped=true; continue; }
+    if(ch==='"'){ quoted=true; atStart=false; continue; }
+    // Before treating punctuation as separators, consume the longest real name.
+    if(atStart&&!/\s/.test(ch)){
+      atStart=false;
+      const aliases=punctuationAliases.get(ch.toLowerCase())||[];
+      const alias=aliases.find(name=>text.slice(i,i+name.length).toLowerCase()===name &&
+        (i+name.length===text.length||separator(text[i+name.length])));
+      if(alias){ i+=alias.length-1; continue; }
+    }
+    if(ch==='(') depth++;
+    else if(ch===')') depth=Math.max(0,depth-1);
+    else if(separator(ch)&&depth===0){
+      const token=text.slice(start,i).trim(); if(token) out.push(token); start=i+1; atStart=true;
+    }
+  }
+  const token=text.slice(start).trim(); if(token) out.push(token);
+  return out;
+}
+function parseWeight(tok){
+  const m=tok.match(/^\(([\s\S]+):(\d+(?:\.\d+)?)\)$/);
+  return m&&Number.isFinite(Number(m[2]))?{base:m[1].trim(),w:Number(m[2])}:null;
+}
+function parsePromptEntries(text,isNegBox){
+  const out=[];
+  const parse=(token,weight=null)=>{
+    if(token.startsWith('"')&&token.endsWith('"')){
+      try{ const label=JSON.parse(token); if(typeof label==='string'){ add(label,weight); return; } }catch(e){}
+    }
+    const exact=resolveTag(token);
+    if(exact){ add(token,weight); return; }
+    const pw=parseWeight(token);
+    if(pw){
+      const w=(weight??1)*pw.w;
+      parsePromptTokens(pw.base).forEach(part=>parse(part,w));
+    } else add(token,weight);
+  };
+  const add=(label,w)=>{
+    const item=resolveTag(label), weight=w===1?null:w;
+    out.push(item?{en:item.en,zh:item.zh,neg:isNegBox,w:weight}:
+      {en:label,zh:null,raw:true,neg:isNegBox,w:weight});
+  };
+  parsePromptTokens(text).forEach(token=>parse(token));
+  return out;
+}
+function syncFromText(text,isNegBox){
+  if(text===lastFormatted[isNegBox?'neg':'pos']) return; // Our own output already has lossless structured state.
+  const entries=parsePromptEntries(text,isNegBox);
+  const editedKeys=new Set(entries.map(entryKey));
+  const newMap=new Map();
+  let inserted=false;
+  const insert=()=>{ entries.forEach(item=>newMap.set(entryKey(item),item)); inserted=true; };
+  // Preserve the edited side's position relative to the untouched side.
+  selected.forEach((item,key)=>{
+    if(item.neg===isNegBox){ if(!inserted) insert(); }
+    else if(!editedKeys.has(key)) newMap.set(key,item);
+  });
+  if(!inserted) insert();
+  selected=newMap; refresh();
+}
+[posOut,negOut].forEach((el,i)=>{
+  let timer=null;
+  const sync=()=>{ clearTimeout(timer); syncFromText(el.value,i===1); };
+  el.addEventListener('blur',sync);
+  el.addEventListener('input',()=>{ clearTimeout(timer); timer=setTimeout(sync,600); });
+});
+
+
+/* ============ 全局搜索（完整数据 + 精选补充）============ */
+const searchIn=document.getElementById('search'), searchRes=document.getElementById('searchRes');
+let searchResults=[];
+searchIn.addEventListener('input',()=>{ renderSearch(); });
+searchIn.addEventListener('focus',()=>{ if(searchIn.value.trim()) renderSearch(); });
+searchIn.addEventListener('keydown',e=>{
+  if(e.key==='Escape'){ searchRes.classList.remove('show'); searchIn.blur(); }
+});
+function renderSearch(){
+  const q=tagKey(searchIn.value);
+  if(!q){ searchRes.classList.remove('show'); searchResults=[]; return; }
+  searchResults=[];
+  for(const item of buildSearchIndex()){
+    if(item.search.includes(q)) searchResults.push(item);
+    if(searchResults.length===60) break;
+  }
+  searchRes.innerHTML=searchResults.map(({en,zh})=>
+    `<div class="r-tag${tagStateClass(en)}" data-en="${escHtml(en)}"><span class="zh">${escHtml(zh)}</span><span class="en">${escHtml(en.replace(/_/g,' '))}</span></div>`
+  ).join('')||'<div class="empty">无匹配</div>';
+  searchRes.classList.add('show');
+  layoutSearchResults();
+}
+// 下拉是 fixed 定位：贴着输入框下沿，随顶栏滚动/窗口缩放重新贴合，不会跑到标签区下面。
+function layoutSearchResults(){
+  const r=searchIn.getBoundingClientRect();
+  if(!r.width||r.bottom<0||r.bottom>innerHeight){ searchRes.classList.remove('show'); return; }
+  const w=Math.min(r.width,520);
+  searchRes.style.width=w+'px';
+  searchRes.style.left=Math.max(6,Math.min(r.left,innerWidth-w-6))+'px';
+  searchRes.style.top=Math.round(r.bottom+4)+'px';
+  searchRes.style.maxHeight=Math.max(140,Math.min(480,innerHeight*0.58,innerHeight-r.bottom-16))+'px';
+}
+const topbarEl=document.querySelector('.topbar');
+if(topbarEl) topbarEl.addEventListener('scroll',()=>{ if(searchRes.classList.contains('show')) layoutSearchResults(); },{passive:true});
+window.addEventListener('resize',()=>{ if(searchRes.classList.contains('show')) layoutSearchResults(); });
+
+searchRes.addEventListener('click',e=>{
+  const t=e.target.closest('.r-tag'); if(!t)return;
+  const en=t.dataset.en, k=tagKey(en);
+  if(selected.has(k)) selected.delete(k); else selected.set(k,{en,zh:labelFor(en),neg:isNeg(en)});
+  refresh(); searchIn.value=''; searchRes.classList.remove('show');
+});
+// 点击搜索框以外的任何地方（含页面其他区域、表单控件）都立即收起下拉
+document.addEventListener('pointerdown',e=>{
+  if(!e.target.closest('.search')) searchRes.classList.remove('show');
+});
+
+/* ============ 复制 / 清未识别（各自文本框右上角）============ */
+function copyPos(){ posOut.value&&navigator.clipboard.writeText(posOut.value).then(()=>flash('✓ 正面已复制')); }
+function copyNeg(){ negOut.value&&navigator.clipboard.writeText(negOut.value).then(()=>flash('✓ 负面已复制')); }
+let flashTimer;
+function flash(m){ const el=document.querySelector('.head .meta'); el.textContent=m; clearTimeout(flashTimer); flashTimer=setTimeout(()=>el.textContent=META_TEXT,1500); }
+/* 清未识别：只清指定一侧（正面/负面）里未匹配到数据库的原文标签。
+   判定以数据层为准（s.raw 或没有中文名），不依赖胶囊的 class。 */
+function clearUnmatched(isNeg){
+  const keys=[];
+  selected.forEach((s,k)=>{ if(s.neg===isNeg&&(s.raw||!s.zh)) keys.push(k); });
+  keys.forEach(k=>selected.delete(k));
+  refresh();
+  flash(keys.length?`✓ 已清理${isNeg?'负面':'正面'}区 ${keys.length} 个未识别标签`:`✓ ${isNeg?'负面':'正面'}区没有未识别标签`);
+}
+
+/* ============ 启动 ============ */
+buildCats(); renderPills(); renderSubs(); renderPanel(); refresh();
+const META_TEXT='全量 '+FULL_TAGS.length.toLocaleString()+' 标签';
+document.getElementById('meta').textContent=META_TEXT;
+/* 首帧出来后在空闲时段预热匹配索引：点第一个标签时不用等 31.7 万条的建表时间。
+   中文反查表和搜索索引仍然按需构建（只有回填/搜索时才用）。 */
+const warmTagIndex=()=>{ if(!tagIndexReady) buildTagIndex(); };
+if(typeof requestIdleCallback==='function') requestIdleCallback(warmTagIndex,{timeout:1500});
+else setTimeout(warmTagIndex,120);
+</script>
+</body>
+</html>
