@@ -59,7 +59,12 @@
   ::-webkit-scrollbar-thumb{background:#2b3546;border-radius:6px;border:2px solid transparent;background-clip:padding-box}
   ::-webkit-scrollbar-thumb:hover{background:#3a465c;background-clip:padding-box;border:2px solid transparent}
   ::-webkit-scrollbar-track{background:transparent}
-  ::selection{background:var(--accent-soft)}
+  /* 文本选中：原来的 accent-soft（14% 透明）在深色底上几乎看不出来，
+     改用不透明度更高的实色；提示词框再按正 / 负两侧的边框色各配一档，选中范围一眼可辨 */
+  ::selection{background:rgba(79,142,247,.45);color:#fff}
+  .obox textarea::selection{background:rgba(79,142,247,.55);color:#fff}
+  .obox textarea.pos::selection{background:rgba(45,212,191,.42);color:#fff}
+  .obox textarea.neg::selection{background:rgba(248,113,113,.42);color:#fff}
 
   /* ===== 主页面：标题 / 搜索 / 输出，中间输出区吃掉剩余高度 ===== */
   .topbar{flex:1;min-height:0;display:flex;flex-direction:column;gap:10px;padding:12px 16px 14px}
