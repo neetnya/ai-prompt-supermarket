@@ -237,8 +237,7 @@
   .s-chip .s-en{color:var(--text2);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .s-chip.raw{border-style:dashed;border-color:var(--accent)}
   .s-chip.raw .s-en{color:var(--accent)}
-  .s-chip .s-ops{display:none;align-items:center;gap:1px;margin-left:2px}
-  .s-chip:hover .s-ops,.s-chip:focus-within .s-ops{display:inline-flex}
+  .s-chip .s-ops{display:inline-flex;align-items:center;gap:1px;margin-left:2px}
   .s-chip-btn{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;padding:0;background:transparent;border:none;border-radius:4px;color:var(--text2);font-size:12px;line-height:1}
   .s-chip-btn:hover{background:var(--accent-soft);color:var(--accent)}
   .s-chip-btn.danger:hover{background:var(--neg-soft);color:var(--neg)}
@@ -796,12 +795,13 @@ function quoteLabel(label,escapeParens){
   }
   return /[,，;；\n"\\]/.test(label)||depth!==0||unbalanced?JSON.stringify(label):label;
 }
+function promptEntryText(s){
+  const label=s.raw||!s.zh?s.en:(outputLanguage==='zh'?labelFor(s.en,s.zh):s.en.replace(/_/g,' '));
+  const text=quoteLabel(label,!s.raw&&!!s.zh);
+  return s.w!=null&&s.w!==1?`(${text}:${s.w})`:text;
+}
 function formatOutputs(){
-  const fmt=s=>{
-    const label=s.raw||!s.zh?s.en:(outputLanguage==='zh'?labelFor(s.en,s.zh):s.en.replace(/_/g,' '));
-    const text=quoteLabel(label,!s.raw&&!!s.zh);
-    return s.w!=null&&s.w!==1?`(${text}:${s.w})`:text;
-  };
+  const fmt=promptEntryText;
   const entries=[...selected.values()], pos=entries.filter(s=>!s.neg), neg=entries.filter(s=>s.neg);
   lastFormatted={pos:pos.map(fmt).join(', '),neg:neg.map(fmt).join(', ')};
   posOut.value=lastFormatted.pos; negOut.value=lastFormatted.neg;
@@ -817,6 +817,27 @@ function formatOutputs(){
 function toggleOutputLanguage(){
   outputLanguage=outputLanguage==='zh'?'en':'zh';
   formatOutputs(); // Never parse/rebuild selected or chips here.
+}
+// 双击右侧胶囊：在左侧同一侧文本框里选中它对应的那一段，方便定位/微调。
+function selectChipInPrompt(s){
+  const ta=s.neg?negOut:posOut;
+  const list=[...selected.values()].filter(x=>!!x.neg===!!s.neg);
+  const idx=list.findIndex(x=>entryKey(x)===entryKey(s));
+  if(idx<0) return;
+  const tokens=list.map(promptEntryText);
+  let start=0;
+  for(let i=0;i<idx;i++) start+=tokens[i].length+2; // join(', ')
+  const token=tokens[idx];
+  // 用户可能刚改过左侧但还没触发回填，此时按整串找不到就全文兜底一次。
+  if(ta.value.slice(start,start+token.length)!==token){
+    const alt=ta.value.indexOf(token);
+    if(alt<0) return;
+    start=alt;
+  }
+  ta.focus({preventScroll:true});
+  ta.setSelectionRange(start,start+token.length);
+  const ratio=start/Math.max(1,ta.value.length);
+  ta.scrollTop=Math.max(0,ratio*(ta.scrollHeight-ta.clientHeight));
 }
 function refresh(){
   document.querySelectorAll('.tagpanel .tag, .search .r-tag').forEach(el=>{
@@ -929,6 +950,7 @@ function renderChips(el,list,isNeg){
     c.draggable=true;
     c.dataset.key=entryKey(s);
     if(s.zh) c.oncontextmenu=e=>{ e.preventDefault(); showWeightEditor(c,s); };
+    c.addEventListener('dblclick',e=>{ if(e.target.closest('.x')) return; selectChipInPrompt(s); });
     c.querySelector('.x:not(.del)').onclick=e=>{ e.stopPropagation(); const s2=selected.get(entryKey(s)); if(s2){ s2.neg=!s2.neg; refresh(); } };
     c.querySelector('.x.del').onclick=e=>{ e.stopPropagation(); selected.delete(entryKey(s)); refresh(); };
     c.addEventListener('dragstart',e=>{ dragChip=c; e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',s.en); c.classList.add('dragging'); });
