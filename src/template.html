@@ -237,6 +237,13 @@
   .s-chip .s-en{color:var(--text2);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .s-chip.raw{border-style:dashed;border-color:var(--accent)}
   .s-chip.raw .s-en{color:var(--accent)}
+  .s-chip .s-ops{display:none;align-items:center;gap:1px;margin-left:2px}
+  .s-chip:hover .s-ops,.s-chip:focus-within .s-ops{display:inline-flex}
+  .s-chip-btn{width:16px;height:16px;display:inline-flex;align-items:center;justify-content:center;padding:0;background:transparent;border:none;border-radius:4px;color:var(--text2);font-size:12px;line-height:1}
+  .s-chip-btn:hover{background:var(--accent-soft);color:var(--accent)}
+  .s-chip-btn.danger:hover{background:var(--neg-soft);color:var(--neg)}
+  .s-chip.editing{cursor:text;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+  .s-chip .s-edit-input{width:128px;max-width:40vw;padding:1px 5px;background:var(--card2);border:1px solid var(--accent);border-radius:5px;color:var(--text);font:inherit;font-size:12.5px;outline:none}
   .sorter-foot{flex:none;display:flex;align-items:stretch;gap:14px;padding:10px 16px;border-top:1px solid var(--border);background:var(--card)}
   .sorter-preview-wrap{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
   .sorter-preview-label{font-size:11.5px;color:var(--text2)}
@@ -328,7 +335,7 @@
     <div class="m-head">
       <span class="t">排序整理</span>
       <span class="sel" id="sorterSide"></span>
-      <span class="hint">拖动胶囊到不同组归类；组内拖动调整顺序；组标题可改名</span>
+      <span class="hint">拖动胶囊归类；组标题可改名；双击胶囊改文本；右键设权重；× 删除标签（应用后生效）</span>
       <button class="x" onclick="closeSorter()" title="关闭（Esc）">×</button>
     </div>
     <div class="sorter-tools">
@@ -930,7 +937,7 @@ function renderChips(el,list,isNeg){
   });
 }
 let weightEditor=null;
-function showWeightEditor(chip,s){
+function showWeightEditor(chip,s,onDone){
   if(weightEditor){ weightEditor.remove(); weightEditor=null; }
   const ed=document.createElement('div');
   ed.className='w-edit';
@@ -950,6 +957,7 @@ function showWeightEditor(chip,s){
     const n=parseFloat(v);
     s.w=(n===1)?null:Math.round(n*100)/100;   // 权重 1 视为无权重，不显示
     refresh();
+    if(onDone) onDone();
     if(weightEditor){ weightEditor.remove(); weightEditor=null; }
   };
   input.onkeydown=e=>{
@@ -1099,7 +1107,10 @@ function sorterNextId(){ return 'g'+(++sorterSeq); }
 function sorterFixedGroup(){ return sorter?sorter.groups.find(g=>g.fixed):null; }
 function sorterPushHistory(){
   if(!sorter) return;
-  sorter.history.push(sorter.groups.map(g=>({id:g.id,name:g.name,fixed:!!g.fixed,keys:g.keys.slice()})));
+  sorter.history.push({
+    groups: sorter.groups.map(g=>({id:g.id,name:g.name,fixed:!!g.fixed,keys:g.keys.slice()})),
+    items: new Map([...sorter.items].map(([k,s])=>[k,{...s}]))
+  });
   if(sorter.history.length>30) sorter.history.shift();
 }
 function sorterFlatKeys(){ return sorter?sorter.groups.flatMap(g=>g.keys):[]; }
@@ -1141,7 +1152,10 @@ function renderSorter(){
       const zh=raw?s.en:labelFor(s.en,s.zh);
       const en=s.en.replace(/_/g,' ');
       const showEn=!raw&&en.toLowerCase()!==String(zh).toLowerCase();
-      return `<span class="s-chip ${s.neg?'neg':'pos'}${raw?' raw':''}" draggable="true" data-key="${escHtml(k)}"${raw?' title="未识别，保留原文"':''}><span class="s-zh">${escHtml(zh)}</span>${showEn?`<span class="s-en">${escHtml(en)}</span>`:''}</span>`;
+      return `<span class="s-chip ${s.neg?'neg':'pos'}${raw?' raw':''}" draggable="true" data-key="${escHtml(k)}"${raw?' title="未识别，保留原文；双击可改文本"':' title="双击改文本，右键设权重"'}>
+        <span class="s-zh">${escHtml(zh)}</span>${showEn?`<span class="s-en">${escHtml(en)}</span>`:''}
+        <span class="s-ops"><button class="s-chip-btn" data-act="edit" title="编辑标签文本（双击）">✎</button><button class="s-chip-btn danger" data-act="del" title="删除该标签（应用后生效）">×</button></span>
+      </span>`;
     }).join('');
     const head=g.fixed
       ?`<span class="s-fixed">${escHtml(g.name)}</span>`
@@ -1161,7 +1175,8 @@ function renderSorter(){
 }
 function openSorter(side){
   const items=new Map();
-  selected.forEach((s,k)=>{ if((s.neg?'neg':'pos')===side) items.set(k,s); });
+  // 克隆一份：弹窗内的改名、权重、删除都是暂存，点「应用排序」才写回。
+  selected.forEach((s,k)=>{ if((s.neg?'neg':'pos')===side) items.set(k,{...s}); });
   sorter={side,items,groups:[{id:'unassigned',name:'未分组',fixed:true,keys:[...items.keys()]}],history:[],drag:null};
   sorterMask.classList.add('open');
   sorterBody.scrollTop=0;
@@ -1232,7 +1247,9 @@ function sorterMergeGroups(){
 }
 function sorterUndo(){
   if(!sorter||!sorter.history.length) return;
-  sorter.groups=sorter.history.pop();
+  const prev=sorter.history.pop();
+  sorter.groups=prev.groups;
+  sorter.items=prev.items;
   renderSorter();
 }
 function sorterSyncFromDom(){
@@ -1278,27 +1295,105 @@ function applySorter(){
   if(!sorter) return;
   const side=sorter.side, items=sorter.items;
   sorterSyncFromDom();
-  const keys=sorterFlatKeys().filter(k=>{
-    const s=selected.get(k);
-    return s&&items.has(k)&&((s.neg?'neg':'pos')===side);
-  });
+  const keys=sorterFlatKeys().filter(k=>items.has(k));
   const next=new Map();
-  keys.forEach(k=>{ const s=selected.get(k); if(s) next.set(k,s); });
-  selected.forEach((s,k)=>{ if(!next.has(k)) next.set(k,s); });
+  keys.forEach(k=>next.set(k,items.get(k)));
+  // 另一侧原样保留；本侧被删除的标签不会进入 next，应用即生效。
+  selected.forEach((s,k)=>{ if((s.neg?'neg':'pos')!==side) next.set(k,s); });
   selected=next;
   closeSorter();
   refresh();
-  flash('✓ 已按整理结果重排 '+keys.length+' 个'+(side==='pos'?'正面':'负面')+'标签');
+  flash('✓ 已写回 '+keys.length+' 个'+(side==='pos'?'正面':'负面')+'标签');
+}
+function sorterEditChip(key){
+  if(!sorter) return;
+  const s=sorter.items.get(key);
+  const chip=[...sorterBody.querySelectorAll('.s-chip')].find(c=>c.dataset.key===key);
+  if(!s||!chip||chip.classList.contains('editing')) return;
+  const old=s.en;
+  chip.classList.add('editing');
+  chip.draggable=false;
+  chip.innerHTML='';
+  const inp=document.createElement('input');
+  inp.className='s-edit-input'; inp.value=old; inp.spellcheck=false;
+  chip.appendChild(inp);
+  inp.focus(); inp.select();
+  let done=false;
+  const finish=commit=>{
+    if(done) return;
+    done=true;
+    const val=inp.value.trim();
+    if(commit&&val&&val!==old) sorterRenameChip(key,val);
+    else renderSorter();
+  };
+  inp.addEventListener('keydown',e=>{
+    e.stopPropagation();
+    if(e.key==='Enter'){ e.preventDefault(); finish(true); }
+    else if(e.key==='Escape'){ e.preventDefault(); finish(false); }
+  });
+  inp.addEventListener('blur',()=>finish(true));
+  inp.addEventListener('click',e=>e.stopPropagation());
+}
+function sorterRenameChip(oldKey,text){
+  if(!sorter) return;
+  const old=sorter.items.get(oldKey);
+  if(!old) return;
+  const hit=resolveTag(text);
+  const entry=hit
+    ?{en:hit.en,zh:hit.zh,neg:old.neg,w:old.w}
+    :{en:text,zh:null,raw:true,neg:old.neg,w:old.w};
+  const newKey=entryKey(entry);
+  if(newKey===oldKey){ renderSorter(); return; }
+  if(sorter.items.has(newKey)){ flash('✗ 已有同名标签'); renderSorter(); return; }
+  sorterPushHistory();
+  sorter.items.delete(oldKey);
+  sorter.items.set(newKey,entry);
+  sorter.groups.forEach(g=>{ g.keys=g.keys.map(k=>k===oldKey?newKey:k); });
+  renderSorter();
+}
+function sorterDeleteChip(key){
+  if(!sorter||!sorter.items.has(key)) return;
+  sorterPushHistory();
+  sorter.items.delete(key);
+  sorter.groups.forEach(g=>{
+    const i=g.keys.indexOf(key);
+    if(i>=0) g.keys.splice(i,1);
+  });
+  renderSorter();
 }
 sorterBody.addEventListener('click',e=>{
+  if(!sorter) return;
+  const op=e.target.closest('.s-chip-btn');
+  if(op){
+    e.preventDefault(); e.stopPropagation();
+    const chip=op.closest('.s-chip');
+    const key=chip&&chip.dataset.key;
+    if(op.dataset.act==='edit') sorterEditChip(key);
+    else if(op.dataset.act==='del') sorterDeleteChip(key);
+    return;
+  }
   const btn=e.target.closest('.s-lane-btn');
-  if(!btn||!sorter) return;
+  if(!btn) return;
   const lane=btn.closest('.s-lane');
   if(!lane) return;
   const gid=lane.dataset.gid;
   if(btn.dataset.act==='up') sorterMoveGroup(gid,-1);
   else if(btn.dataset.act==='down') sorterMoveGroup(gid,1);
   else if(btn.dataset.act==='del') sorterDeleteGroup(gid);
+});
+sorterBody.addEventListener('dblclick',e=>{
+  if(!sorter||e.target.closest('.s-chip-btn')) return;
+  const chip=e.target.closest('.s-chip');
+  if(chip) sorterEditChip(chip.dataset.key);
+});
+sorterBody.addEventListener('contextmenu',e=>{
+  if(!sorter) return;
+  const chip=e.target.closest('.s-chip');
+  if(!chip) return;
+  const s=sorter.items.get(chip.dataset.key);
+  if(!s||s.raw||!s.zh) return;
+  e.preventDefault();
+  showWeightEditor(chip,s,()=>{ if(sorter) sorterUpdateMeta(); });
 });
 sorterBody.addEventListener('input',e=>{
   const inp=e.target.closest('.s-lane-name');
@@ -1311,6 +1406,7 @@ sorterBody.addEventListener('keydown',e=>{
   if(e.key==='Enter'&&e.target.classList.contains('s-lane-name')){ e.preventDefault(); e.target.blur(); }
 });
 sorterBody.addEventListener('dragstart',e=>{
+  if(e.target.closest('.s-chip-btn,.s-edit-input')){ e.preventDefault(); return; }
   const chip=e.target.closest('.s-chip');
   if(!sorter||!chip) return;
   sorter.drag=chip;
