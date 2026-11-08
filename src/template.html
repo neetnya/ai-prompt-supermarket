@@ -205,6 +205,49 @@
   .modal .pills-scroll{flex-wrap:wrap;overflow-x:visible;padding-bottom:0}
   .modal .subs-row{padding:2px 16px 6px}
   .modal .tagpanel{margin:4px 16px 14px}
+
+  /* ===== 排序整理弹窗：分组 + 组内排序 ===== */
+  .mask.sorter-mask{z-index:210;background:rgba(4,7,12,.62)}
+  .modal.sorter{max-width:1120px;height:min(88vh,920px);max-height:min(88vh,920px)}
+  .sorter-tools{flex:none;display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 16px;border-bottom:1px solid var(--border);background:var(--card2)}
+  .sorter-tools .btn{padding:5px 12px;font-size:12.5px}
+  .sorter-tools .btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+  .sorter-tools .sorter-stat{margin-left:auto;font-size:12px;color:var(--text2);white-space:nowrap}
+  .sorter-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:10px;padding:12px 14px;background:var(--bg)}
+  .s-lane{flex:none;background:var(--card);border:1px solid var(--border);border-radius:10px;padding:8px 10px 10px}
+  .s-lane-head{display:flex;align-items:center;gap:8px;margin-bottom:7px}
+  .s-lane-head .s-lane-name{width:150px;min-width:0;background:transparent;border:1px solid transparent;border-radius:6px;color:var(--text);font-size:13px;font-weight:600;padding:2px 6px;outline:none}
+  .s-lane-head .s-lane-name:hover{border-color:var(--border)}
+  .s-lane-head .s-lane-name:focus{border-color:var(--accent);background:var(--card2)}
+  .s-lane-head .s-fixed{font-size:13px;font-weight:600;color:var(--text2);padding:2px 6px;white-space:nowrap}
+  .s-lane-head .s-count{font-size:11.5px;color:var(--text2);background:var(--card2);border:1px solid var(--border);border-radius:9px;padding:0 7px;line-height:1.7}
+  .s-lane-head .s-acts{margin-left:auto;display:flex;gap:3px}
+  .s-lane-btn{width:24px;height:24px;display:inline-flex;align-items:center;justify-content:center;background:var(--card2);border:1px solid var(--border);border-radius:6px;color:var(--text2);font-size:13px;line-height:1;transition:background .12s,border-color .12s,color .12s}
+  .s-lane-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+  .s-lane-btn:disabled{opacity:.35;cursor:not-allowed}
+  .s-lane-btn.danger:hover{background:var(--neg-soft);border-color:var(--neg);color:var(--neg)}
+  .s-lane-chips{display:flex;flex-wrap:wrap;align-content:flex-start;gap:6px;min-height:46px;padding:7px 8px;border:1px dashed var(--border);border-radius:8px;background:var(--card2)}
+  .s-empty{font-size:12px;color:var(--text2);opacity:.65;line-height:30px;padding:0 4px;pointer-events:none}
+  .s-chip{display:inline-flex;align-items:center;gap:6px;max-width:100%;background:var(--card);border:1px solid var(--border);border-radius:14px;padding:3px 9px;font-size:12.5px;line-height:1.5;cursor:grab;user-select:none}
+  .s-chip:active{cursor:grabbing}
+  .s-chip.pos{border-color:rgba(45,212,191,.55)}
+  .s-chip.neg{border-color:rgba(248,113,113,.55)}
+  .s-chip.dragging{opacity:.5;border-style:dashed;box-shadow:0 6px 16px rgba(0,0,0,.4)}
+  .s-chip .s-zh{color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .s-chip .s-en{color:var(--text2);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .s-chip.raw{border-style:dashed;border-color:var(--accent)}
+  .s-chip.raw .s-en{color:var(--accent)}
+  .sorter-foot{flex:none;display:flex;align-items:stretch;gap:14px;padding:10px 16px;border-top:1px solid var(--border);background:var(--card)}
+  .sorter-preview-wrap{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px}
+  .sorter-preview-label{font-size:11.5px;color:var(--text2)}
+  .sorter-preview{font-family:Consolas,monospace;font-size:12px;line-height:1.6;color:var(--text);background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:7px 10px;max-height:88px;overflow-y:auto;white-space:pre-wrap;word-break:break-word}
+  .sorter-actions{flex:none;display:flex;flex-direction:column;justify-content:flex-end;gap:6px}
+  .sorter-actions .btn{min-width:116px}
+  @media (max-width:860px){
+    .modal.sorter{height:94vh;max-height:94vh}
+    .sorter-foot{flex-direction:column}
+    .sorter-actions{flex-direction:row;justify-content:flex-end}
+  }
 </style>
 </head>
 <body>
@@ -250,11 +293,11 @@
     </div>
     <div class="col">
       <div class="chipbox">
-        <label>正面标签 <span class="cnt" id="posChipCnt">0</span><span class="tip">拖动排序 · 右键设权重</span></label>
+        <label>正面标签 <span class="cnt" id="posChipCnt">0</span><button class="mini" onclick="openSorter('pos')" title="分组整理标签顺序（按分类 / 手动归类）">排序整理</button><span class="tip">拖动排序 · 右键设权重</span></label>
         <div class="chips" id="posChips"></div>
       </div>
       <div class="chipbox">
-        <label>负面标签 <span class="cnt" id="negChipCnt">0</span><span class="tip">± 可翻回正面</span></label>
+        <label>负面标签 <span class="cnt" id="negChipCnt">0</span><button class="mini" onclick="openSorter('neg')" title="分组整理标签顺序（按分类 / 手动归类）">排序整理</button><span class="tip">± 可翻回正面</span></label>
         <div class="chips" id="negChips"></div>
       </div>
     </div>
@@ -276,6 +319,36 @@
     </div>
     <div class="subs-row" id="subsRow"></div>
     <div class="tagpanel" id="tagpanel"></div>
+  </div>
+</div>
+
+<!-- ④ 排序整理弹窗：一键按分类分组，或手动建组后把标签拖进对应组 -->
+<div class="mask sorter-mask" id="sorterMask" onclick="if(event.target===this)closeSorter()">
+  <div class="modal sorter" role="dialog" aria-modal="true" aria-label="排序整理">
+    <div class="m-head">
+      <span class="t">排序整理</span>
+      <span class="sel" id="sorterSide"></span>
+      <span class="hint">拖动胶囊到不同组归类；组内拖动调整顺序；组标题可改名</span>
+      <button class="x" onclick="closeSorter()" title="关闭（Esc）">×</button>
+    </div>
+    <div class="sorter-tools">
+      <button class="btn ghost" onclick="sorterAutoGroup()" title="按筛选窗口的分类顺序自动分组，未识别的进入未分组">一键按分类排序</button>
+      <button class="btn ghost" onclick="sorterAddGroup()" title="新建一个空分组，放到未分组之前">＋ 新建分组</button>
+      <button class="btn ghost" onclick="sorterMergeGroups()" title="把所有分组按当前顺序合并回未分组">合并为一组</button>
+      <button class="btn ghost" id="sorterUndo" onclick="sorterUndo()" title="撤销上一次自动分组 / 新建 / 删除 / 合并" disabled>↶ 撤销</button>
+      <span class="sorter-stat" id="sorterStat"></span>
+    </div>
+    <div class="sorter-body" id="sorterBody"></div>
+    <div class="sorter-foot">
+      <div class="sorter-preview-wrap">
+        <span class="sorter-preview-label">实时预览（应用后立即写回提示词）</span>
+        <div class="sorter-preview" id="sorterPreview"></div>
+      </div>
+      <div class="sorter-actions">
+        <button class="btn ghost" onclick="closeSorter()">取消</button>
+        <button class="btn primary" onclick="applySorter()">应用排序</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -766,7 +839,9 @@ function openLibrary(){
 }
 function closeLibrary(){ libMask.classList.remove('open'); }
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'&&libMask.classList.contains('open')&&!weightEditor) closeLibrary();
+  if(e.key!=='Escape') return;
+  if(sorterMask.classList.contains('open')){ closeSorter(); return; }
+  if(libMask.classList.contains('open')&&!weightEditor) closeLibrary();
 });
 
 /* 拖动排序：拖动时把胶囊本体移到目标位置，直接预览最终顺序；
@@ -987,6 +1062,289 @@ function syncFromText(text,isNegBox){
   el.addEventListener('input',()=>{ clearTimeout(timer); timer=setTimeout(sync,600); });
 });
 
+/* ============ 排序整理：按分类自动分组，或手动建组归类，应用时只改顺序 ============ */
+const sorterMask=document.getElementById('sorterMask');
+const sorterBody=document.getElementById('sorterBody');
+const sorterPreview=document.getElementById('sorterPreview');
+const sorterStat=document.getElementById('sorterStat');
+const sorterUndoBtn=document.getElementById('sorterUndo');
+const sorterSideEl=document.getElementById('sorterSide');
+const SORTER_CATS=Object.keys(CURATED).concat(['角色','画师','版权/作品']);
+// 同一个标签可能同时出现在多个精选分类（如 panties 在服装和 NSFW）：按筛选窗口的先后取第一个。
+const SORTER_CURATED_CAT=new Map();
+Object.entries(CURATED).forEach(([c,list])=>list.forEach(en=>{
+  const k=tagKey(en); if(!SORTER_CURATED_CAT.has(k)) SORTER_CURATED_CAT.set(k,c);
+}));
+let sorter=null, sorterSeq=0;
+
+function sorterCategoryOf(en){
+  const k=tagKey(en);
+  const curated=SORTER_CURATED_CAT.get(k);
+  if(curated) return curated;
+  const sp=String(en).replace(/_/g,' ');
+  for(const c of Object.keys(AUTO)){
+    const ex=AUTO_EXCLUDE[c];
+    if(ex&&ex.test(en)) continue;
+    if(AUTO_RE[c].test(sp)) return c;
+  }
+  const row=fullMap.get(k);
+  if(row){
+    if(row[2]===4) return '角色';
+    if(row[2]===1) return '画师';
+    if(row[2]===3) return '版权/作品';
+  }
+  return '其他';
+}
+function sorterNextId(){ return 'g'+(++sorterSeq); }
+function sorterFixedGroup(){ return sorter?sorter.groups.find(g=>g.fixed):null; }
+function sorterPushHistory(){
+  if(!sorter) return;
+  sorter.history.push(sorter.groups.map(g=>({id:g.id,name:g.name,fixed:!!g.fixed,keys:g.keys.slice()})));
+  if(sorter.history.length>30) sorter.history.shift();
+}
+function sorterFlatKeys(){ return sorter?sorter.groups.flatMap(g=>g.keys):[]; }
+// 拖动过程中分组还是旧数据，预览与计数直接读 DOM 的即时顺序。
+function sorterCurrentKeys(){
+  if(!sorter) return [];
+  if(sorter.drag&&sorter.drag.isConnected){
+    const out=[];
+    sorterBody.querySelectorAll('.s-lane-chips').forEach(lane=>lane.querySelectorAll('.s-chip').forEach(c=>{
+      if(c.dataset.key) out.push(c.dataset.key);
+    }));
+    return out;
+  }
+  return sorterFlatKeys();
+}
+function sorterTextOf(key){
+  const s=sorter&&sorter.items.get(key);
+  if(!s) return String(key).replace(/^raw:/,'');
+  const label=s.raw||!s.zh?s.en:(outputLanguage==='zh'?labelFor(s.en,s.zh):s.en.replace(/_/g,' '));
+  const text=quoteLabel(label,!s.raw&&!!s.zh);
+  return s.w!=null&&s.w!==1?`(${text}:${s.w})`:text;
+}
+function sorterUpdateMeta(){
+  if(!sorter) return;
+  const keys=sorterCurrentKeys();
+  sorterSideEl.textContent=(sorter.side==='pos'?'正面':'负面')+' · '+keys.length+' 个';
+  sorterPreview.textContent=keys.length?keys.map(sorterTextOf).join(', '):'（当前没有标签）';
+  const groups=sorter.groups.filter(g=>!g.fixed).length;
+  sorterStat.textContent=keys.length+' 个标签 · '+(groups?groups+' 个分组 + 未分组':'未分组');
+  sorterUndoBtn.disabled=!sorter.history.length;
+}
+function renderSorter(){
+  if(!sorter) return;
+  const scroll=sorterBody.scrollTop||0;
+  sorterBody.innerHTML=sorter.groups.map((g,gi)=>{
+    const chips=g.keys.map(k=>{
+      const s=sorter.items.get(k); if(!s) return '';
+      const raw=s.raw||!s.zh;
+      const zh=raw?s.en:labelFor(s.en,s.zh);
+      const en=s.en.replace(/_/g,' ');
+      const showEn=!raw&&en.toLowerCase()!==String(zh).toLowerCase();
+      return `<span class="s-chip ${s.neg?'neg':'pos'}${raw?' raw':''}" draggable="true" data-key="${escHtml(k)}"${raw?' title="未识别，保留原文"':''}><span class="s-zh">${escHtml(zh)}</span>${showEn?`<span class="s-en">${escHtml(en)}</span>`:''}</span>`;
+    }).join('');
+    const head=g.fixed
+      ?`<span class="s-fixed">${escHtml(g.name)}</span>`
+      :`<input class="s-lane-name" value="${escHtml(g.name)}" maxlength="24" spellcheck="false" aria-label="分组名称">`;
+    const acts=g.fixed?'':`<span class="s-acts">
+        <button class="s-lane-btn" data-act="up" title="上移分组"${gi===0?' disabled':''}>↑</button>
+        <button class="s-lane-btn" data-act="down" title="下移分组"${gi===sorter.groups.length-2?' disabled':''}>↓</button>
+        <button class="s-lane-btn danger" data-act="del" title="删除分组，标签回到未分组">×</button>
+      </span>`;
+    return `<div class="s-lane" data-gid="${escHtml(g.id)}">
+      <div class="s-lane-head">${head}<span class="s-count">${g.keys.length}</span>${acts}</div>
+      <div class="s-lane-chips">${chips||'<span class="s-empty">拖标签到这里</span>'}</div>
+    </div>`;
+  }).join('');
+  sorterBody.scrollTop=scroll;
+  sorterUpdateMeta();
+}
+function openSorter(side){
+  const items=new Map();
+  selected.forEach((s,k)=>{ if((s.neg?'neg':'pos')===side) items.set(k,s); });
+  sorter={side,items,groups:[{id:'unassigned',name:'未分组',fixed:true,keys:[...items.keys()]}],history:[],drag:null};
+  sorterMask.classList.add('open');
+  sorterBody.scrollTop=0;
+  renderSorter();
+}
+function closeSorter(){
+  sorterMask.classList.remove('open');
+  sorter=null;
+}
+function sorterAutoGroup(){
+  if(!sorter) return;
+  if(!sorter.items.size){ flash('当前这一侧还没有标签'); return; }
+  sorterPushHistory();
+  const buckets=new Map();
+  sorterFlatKeys().forEach(k=>{
+    const s=sorter.items.get(k); if(!s) return;
+    const cat=(s.raw||!s.zh)?'其他':sorterCategoryOf(s.en);
+    if(!buckets.has(cat)) buckets.set(cat,[]);
+    buckets.get(cat).push(k);
+  });
+  const other=(buckets.get('其他')||[]).slice();
+  const lanes=[];
+  SORTER_CATS.forEach(c=>{
+    const keys=buckets.get(c);
+    if(keys&&keys.length) lanes.push({id:sorterNextId(),name:c,keys:keys.slice()});
+  });
+  buckets.forEach((keys,c)=>{ if(c!=='其他'&&!SORTER_CATS.includes(c)) other.push(...keys); });
+  lanes.push({id:'unassigned',name:'未分组',fixed:true,keys:other});
+  sorter.groups=lanes;
+  renderSorter();
+}
+function sorterAddGroup(){
+  if(!sorter) return;
+  sorterPushHistory();
+  const g={id:sorterNextId(),name:'分组 '+(sorter.groups.length),keys:[]};
+  sorter.groups.splice(Math.max(0,sorter.groups.length-1),0,g);
+  renderSorter();
+  const inp=sorterBody.querySelector('.s-lane[data-gid="'+g.id+'"] .s-lane-name');
+  if(inp){ inp.focus(); inp.select(); inp.scrollIntoView({block:'nearest'}); }
+}
+function sorterDeleteGroup(gid){
+  if(!sorter) return;
+  const g=sorter.groups.find(x=>x.id===gid);
+  if(!g||g.fixed) return;
+  sorterPushHistory();
+  const fixed=sorterFixedGroup();
+  if(fixed) fixed.keys.push(...g.keys);
+  sorter.groups=sorter.groups.filter(x=>x!==g);
+  renderSorter();
+}
+function sorterMoveGroup(gid,dir){
+  if(!sorter) return;
+  const i=sorter.groups.findIndex(g=>g.id===gid);
+  const g=sorter.groups[i];
+  if(!g||g.fixed) return;
+  const j=i+dir;
+  if(j<0||j>=sorter.groups.length-1) return; // 未分组固定在最后，不能越过它
+  sorterPushHistory();
+  sorter.groups.splice(i,1);
+  sorter.groups.splice(j,0,g);
+  renderSorter();
+}
+function sorterMergeGroups(){
+  if(!sorter) return;
+  sorterPushHistory();
+  sorter.groups=[{id:'unassigned',name:'未分组',fixed:true,keys:sorterFlatKeys()}];
+  renderSorter();
+}
+function sorterUndo(){
+  if(!sorter||!sorter.history.length) return;
+  sorter.groups=sorter.history.pop();
+  renderSorter();
+}
+function sorterSyncFromDom(){
+  if(!sorter) return;
+  const seen=new Set();
+  sorter.groups.forEach(g=>{
+    const lane=sorterBody.querySelector('.s-lane[data-gid="'+g.id+'"] .s-lane-chips');
+    const keys=[];
+    if(lane) lane.querySelectorAll('.s-chip').forEach(c=>{
+      const k=c.dataset.key;
+      if(!k||seen.has(k)||!sorter.items.has(k)) return;
+      seen.add(k); keys.push(k);
+    });
+    g.keys=keys;
+  });
+  // 兜底：DOM 里没找到的标签放回未分组，避免应用时丢失。
+  sorter.items.forEach((s,k)=>{ if(!seen.has(k)){ const f=sorterFixedGroup(); if(f) f.keys.push(k); } });
+}
+function sorterMoveChip(chip,container,target,before){
+  if(!sorter||!chip) return;
+  if(container===chip.parentElement){
+    if(target?target.previousElementSibling===chip:container.lastElementChild===chip) return;
+  }
+  const rects=new Map();
+  sorterBody.querySelectorAll('.s-chip').forEach(x=>{ if(x!==chip) rects.set(x,x.getBoundingClientRect()); });
+  container.querySelectorAll('.s-empty').forEach(x=>x.remove());
+  if(target) before?target.before(chip):target.after(chip);
+  else container.appendChild(chip);
+  sorterBody.querySelectorAll('.s-chip').forEach(x=>{
+    if(x===chip) return;
+    const o=rects.get(x); if(!o) return;
+    const n=x.getBoundingClientRect(), dx=o.left-n.left, dy=o.top-n.top;
+    if(!dx&&!dy) return;
+    x.style.transition='none';
+    x.style.transform='translate('+dx+'px,'+dy+'px)';
+    void x.offsetWidth;
+    x.style.transition='transform .15s ease';
+    x.style.transform='';
+  });
+  sorterUpdateMeta();
+}
+function applySorter(){
+  if(!sorter) return;
+  const side=sorter.side, items=sorter.items;
+  sorterSyncFromDom();
+  const keys=sorterFlatKeys().filter(k=>{
+    const s=selected.get(k);
+    return s&&items.has(k)&&((s.neg?'neg':'pos')===side);
+  });
+  const next=new Map();
+  keys.forEach(k=>{ const s=selected.get(k); if(s) next.set(k,s); });
+  selected.forEach((s,k)=>{ if(!next.has(k)) next.set(k,s); });
+  selected=next;
+  closeSorter();
+  refresh();
+  flash('✓ 已按整理结果重排 '+keys.length+' 个'+(side==='pos'?'正面':'负面')+'标签');
+}
+sorterBody.addEventListener('click',e=>{
+  const btn=e.target.closest('.s-lane-btn');
+  if(!btn||!sorter) return;
+  const lane=btn.closest('.s-lane');
+  if(!lane) return;
+  const gid=lane.dataset.gid;
+  if(btn.dataset.act==='up') sorterMoveGroup(gid,-1);
+  else if(btn.dataset.act==='down') sorterMoveGroup(gid,1);
+  else if(btn.dataset.act==='del') sorterDeleteGroup(gid);
+});
+sorterBody.addEventListener('input',e=>{
+  const inp=e.target.closest('.s-lane-name');
+  if(!inp||!sorter) return;
+  const lane=inp.closest('.s-lane');
+  const g=lane&&sorter.groups.find(x=>x.id===lane.dataset.gid);
+  if(g) g.name=inp.value;
+});
+sorterBody.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&e.target.classList.contains('s-lane-name')){ e.preventDefault(); e.target.blur(); }
+});
+sorterBody.addEventListener('dragstart',e=>{
+  const chip=e.target.closest('.s-chip');
+  if(!sorter||!chip) return;
+  sorter.drag=chip;
+  chip.classList.add('dragging');
+  if(e.dataTransfer){ e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',chip.dataset.key||''); }
+});
+sorterBody.addEventListener('dragend',e=>{
+  if(!sorter) return;
+  const chip=e.target.closest('.s-chip');
+  if(chip) chip.classList.remove('dragging');
+  sorterSyncFromDom();
+  sorter.drag=null;
+  renderSorter(); // 重建空组提示和计数；顺序已在 DOM 里落定
+});
+sorterBody.addEventListener('dragover',e=>{
+  if(!sorter||!sorter.drag) return;
+  const laneChips=e.target.closest('.s-lane-chips');
+  if(!laneChips) return;
+  e.preventDefault();
+  if(e.dataTransfer) e.dataTransfer.dropEffect='move';
+  const over=e.target.closest('.s-chip');
+  if(over&&over!==sorter.drag){
+    const r=over.getBoundingClientRect();
+    const sameRow=e.clientY>=r.top&&e.clientY<=r.bottom;
+    const before=sameRow?e.clientX<r.left+r.width/2:e.clientY<r.top+r.height/2;
+    sorterMoveChip(sorter.drag,over.parentElement,over,before);
+  }else if(!over){
+    const chips=[...laneChips.querySelectorAll('.s-chip')].filter(x=>x!==sorter.drag);
+    const last=chips[chips.length-1];
+    if(!last){ sorterMoveChip(sorter.drag,laneChips,null,false); return; }
+    const r=last.getBoundingClientRect();
+    if(e.clientY>r.bottom||(e.clientY>=r.top&&e.clientX>r.right)) sorterMoveChip(sorter.drag,laneChips,null,false);
+  }
+});
 
 /* ============ 全局搜索（完整数据 + 精选补充）============ */
 const searchIn=document.getElementById('search'), searchRes=document.getElementById('searchRes');
