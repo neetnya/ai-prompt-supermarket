@@ -121,7 +121,7 @@
   .chip .x{color:var(--text2);font-weight:700;opacity:.7;cursor:pointer}
   .chip{cursor:grab}
   .chip:active{cursor:grabbing}
-  .chip.dragging{opacity:.5;border-style:dashed}
+  .chip.dragging{opacity:.55;border-style:dashed;box-shadow:0 8px 22px rgba(0,0,0,.45)}
   .chip .x:hover{opacity:1;color:var(--neg)}
   .chip.pos{border-color:var(--pos)}
   .chip.neg{border-color:var(--neg)}
@@ -769,7 +769,64 @@ document.addEventListener('keydown',e=>{
   if(e.key==='Escape'&&libMask.classList.contains('open')&&!weightEditor) closeLibrary();
 });
 
-let dragKey=null;  // 正在拖动的 chip 的 lowercase en
+/* 拖动排序：拖动时把胶囊本体移到目标位置，直接预览最终顺序；
+   其余胶囊用 FLIP（先量坐标 → 落位 → 反向平移 → 过渡回原位）补一段位移动画，避免瞬移。 */
+let dragChip=null;
+function moveChipPreview(container,target,before){
+  const chip=dragChip;
+  if(!chip||chip.parentElement!==container||target===chip) return;
+  const rects=new Map();
+  container.querySelectorAll('.chip').forEach(x=>{ if(x!==chip) rects.set(x,x.getBoundingClientRect()); });
+  if(target) before?target.before(chip):target.after(chip);
+  else container.appendChild(chip);
+  container.querySelectorAll('.chip').forEach(x=>{
+    if(x===chip) return;
+    const o=rects.get(x); if(!o) return;
+    const n=x.getBoundingClientRect(), dx=o.left-n.left, dy=o.top-n.top;
+    if(!dx&&!dy) return;
+    x.style.transition='none';
+    x.style.transform='translate('+dx+'px,'+dy+'px)';
+    void x.offsetWidth;  // 先让起始帧生效，再切到过渡
+    x.style.transition='transform .16s ease';
+    x.style.transform='';
+  });
+}
+/* 拖动期间只动 DOM，松手时按两栏 DOM 顺序回写 selected（Map 顺序即输出顺序）。 */
+function commitChipOrder(){
+  const posKeys=[...posChips.querySelectorAll('.chip')].map(c=>c.dataset.key).filter(k=>k&&selected.has(k));
+  const negKeys=[...negChips.querySelectorAll('.chip')].map(c=>c.dataset.key).filter(k=>k&&selected.has(k));
+  if(!posKeys.length&&!negKeys.length) return;
+  const seen=new Set(posKeys.concat(negKeys));
+  selected.forEach((s,k)=>{ if(!seen.has(k)) (s.neg?negKeys:posKeys).push(k); }); // 兜底：DOM 里缺席的按原侧补回
+  const next=new Map();
+  posKeys.forEach(k=>next.set(k,selected.get(k)));
+  negKeys.forEach(k=>next.set(k,selected.get(k)));
+  selected=next;
+  refresh();
+}
+[posChips,negChips].forEach(container=>{
+  container.addEventListener('dragover',e=>{
+    if(!dragChip||dragChip.parentElement!==container) return;  // 只在本栏内排序
+    e.preventDefault();
+    if(e.dataTransfer) e.dataTransfer.dropEffect='move';
+    const over=e.target instanceof Element?e.target.closest('.chip'):null;
+    if(over&&over!==dragChip){
+      const r=over.getBoundingClientRect();
+      // 行内按左右半区决定插前插后；跨行时按上下半区
+      const before=e.clientY>r.bottom?false:e.clientY<r.top?true:e.clientX<=r.left+r.width/2;
+      moveChipPreview(container,over,before);
+    }else if(!over){
+      const chips=[...container.querySelectorAll('.chip')].filter(x=>x!==dragChip);
+      const last=chips[chips.length-1];
+      if(last){
+        const r=last.getBoundingClientRect();
+        // 只有指针确实越过最后一枚胶囊才追加到队尾，避免在首行缝隙里误移
+        if(e.clientY>r.bottom||(e.clientY>=r.top&&e.clientX>r.right)) moveChipPreview(container,null,false);
+      }
+    }
+  });
+  container.addEventListener('drop',e=>{ if(dragChip) e.preventDefault(); });
+});
 function renderChips(el,list,isNeg){
   el.innerHTML='';
   if(!list.length){
@@ -788,13 +845,12 @@ function renderChips(el,list,isNeg){
       ?`<span class="x" title="点击切换正负">±</span><span class="en">${escHtml(s.en)}</span>${wBadge}<span class="raw-badge" title="未匹配到数据库，保留原文">?</span><span class="x del" title="删除该提示词">×</span>`
       :`<span class="x" title="点击切换正负">±</span><span class="zh">${escHtml(labelFor(s.en,s.zh))}</span><span class="en">${escHtml(s.en.replace(/_/g,' '))}</span>${wBadge}<span class="x del" title="删除该提示词">×</span>`;
     c.draggable=true;
+    c.dataset.key=entryKey(s);
     if(s.zh) c.oncontextmenu=e=>{ e.preventDefault(); showWeightEditor(c,s); };
     c.querySelector('.x:not(.del)').onclick=e=>{ e.stopPropagation(); const s2=selected.get(entryKey(s)); if(s2){ s2.neg=!s2.neg; refresh(); } };
     c.querySelector('.x.del').onclick=e=>{ e.stopPropagation(); selected.delete(entryKey(s)); refresh(); };
-    c.addEventListener('dragstart',e=>{ dragKey=entryKey(s); e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',s.en); c.classList.add('dragging'); });
-    c.addEventListener('dragend',()=>{ dragKey=null; el.querySelectorAll('.chip.dragging').forEach(x=>x.classList.remove('dragging')); });
-    c.addEventListener('dragover',e=>{ e.preventDefault(); e.dataTransfer.dropEffect='move'; });
-    c.addEventListener('drop',e=>{ e.preventDefault(); reorderChips(entryKey(s),isNeg); });
+    c.addEventListener('dragstart',e=>{ dragChip=c; e.dataTransfer.effectAllowed='move'; e.dataTransfer.setData('text/plain',s.en); c.classList.add('dragging'); });
+    c.addEventListener('dragend',()=>{ c.classList.remove('dragging'); if(dragChip===c) dragChip=null; commitChipOrder(); });
     el.appendChild(c);
   });
 }
@@ -837,21 +893,6 @@ function showWeightEditor(chip,s){
 document.addEventListener('click',e=>{
   if(weightEditor && !e.target.closest('.w-edit')){ const f=weightEditor.__apply; if(f) f(); }
 });
-function reorderChips(targetKey,isNeg){
-  if(!dragKey||dragKey===targetKey) return;
-  const keys=[...selected.keys()];
-  const posKeys=keys.filter(k=>!selected.get(k).neg);
-  const negKeys=keys.filter(k=>selected.get(k).neg);
-  const src=isNeg?negKeys:posKeys;
-  const from=src.indexOf(dragKey), to=src.indexOf(targetKey);
-  if(from<0||to<0) return;
-  src.splice(from,1); src.splice(to,0,dragKey);
-  const newMap=new Map();
-  posKeys.forEach(k=>newMap.set(k,selected.get(k)));
-  negKeys.forEach(k=>newMap.set(k,selected.get(k)));
-  selected=newMap;
-  refresh();
-}
 
 /* ============ 提示词回填识别：粘贴/输入 → 自动识别成胶囊 ============ */
 const escHtml=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
