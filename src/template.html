@@ -783,18 +783,12 @@ function tagStateClass(en){
 function escapePromptLabel(label){ return String(label).replace(/[\\()]/g,'\\$&'); }
 function unescapePromptLabel(label){ return String(label).replace(/\\([\\()])/g,'$1'); }
 function quoteLabel(label,escapeParens){
-  // Quoted labels disambiguate embedded separators and parser syntax on round trips.
-  let depth=0, unbalanced=false;
-  for(const ch of label){
-    if(ch==='(') depth++;
-    else if(ch===')'&&--depth<0) unbalanced=true;
-  }
+  // 只有在包含分隔符（逗号/分号/换行）或双引号时才用双引号包裹，避免普通括号/反斜杠被自动补引号
   if(escapeParens){
-    // 已知标签名：括号/反斜杠用反斜杠转义即可，只有分隔符和双引号才需要引号保护。
     const text=escapePromptLabel(label);
     return /[,，;；\n"]/.test(label)?JSON.stringify(text):text;
   }
-  return /[,，;；\n"\\]/.test(label)||depth!==0||unbalanced?JSON.stringify(label):label;
+  return /[,，;；\n"]/.test(label)?JSON.stringify(label):label;
 }
 function promptEntryText(s){
   const label=s.raw||!s.zh?s.en:(outputLanguage==='zh'?labelFor(s.en,s.zh):s.en.replace(/_/g,' '));
@@ -1047,7 +1041,18 @@ function parsePromptTokens(text){
 }
 function parseWeight(tok){
   const m=tok.match(/^\(([\s\S]+):(\d+(?:\.\d+)?)\)$/);
-  return m&&Number.isFinite(Number(m[2]))?{base:m[1].trim(),w:Number(m[2])}:null;
+  if(m&&Number.isFinite(Number(m[2]))) return {base:m[1].trim(),w:Number(m[2])};
+  // 兼容 WebUI/NAI 纯括号加权写法 (tag) → 1.1 倍，避免整段被当成未识别原文并加引号
+  const bare=tok.match(/^\(([\s\S]+)\)$/);
+  if(bare){
+    let d=0, paired=true;
+    for(let i=0;i<tok.length-1;i++){
+      if(tok[i]==='(') d++;
+      else if(tok[i]===')'&&--d<=0){ paired=false; break; }
+    }
+    if(paired&&d===1) return {base:bare[1].trim(),w:1.1};
+  }
+  return null;
 }
 function parsePromptEntries(text,isNegBox){
   const out=[];
@@ -1059,14 +1064,14 @@ function parsePromptEntries(text,isNegBox){
     if(exact){ add(token,weight); return; }
     const pw=parseWeight(token);
     if(pw){
-      const w=(weight??1)*pw.w;
+      const w=Math.round(((weight??1)*pw.w)*100)/100;
       parsePromptTokens(pw.base).forEach(part=>parse(part,w));
     } else add(token,weight);
   };
   const add=(label,w)=>{
     const item=resolveTag(label), weight=w===1?null:w;
     out.push(item?{en:item.en,zh:item.zh,neg:isNegBox,w:weight}:
-      {en:label,zh:null,raw:true,neg:isNegBox,w:weight});
+      {en:unescapePromptLabel(label),zh:null,raw:true,neg:isNegBox,w:weight});
   };
   parsePromptTokens(text).forEach(token=>parse(token));
   return out;
