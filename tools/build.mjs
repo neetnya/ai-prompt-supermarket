@@ -6,15 +6,23 @@
 //
 //   import {analyze, render, ...}   给其它脚本复用
 //
-// 兼容性：Node 12 起可用（不用 node: 前缀、不用 assert/strict、不用 ?. 与 ??）。
-import {readFileSync, writeFileSync} from 'fs';
+// 兼容性：读取 tag.sqlite 依赖内置 node:sqlite（Node 22.13+ / 23.4+ 起无需
+// --experimental-sqlite 标志），因此构建需 Node 22.13+；页面产物本身仍兼容旧浏览器。
+import {readFileSync, writeFileSync, existsSync} from 'fs';
 import {createHash} from 'crypto';
 import {fileURLToPath, pathToFileURL} from 'url';
 import {resolve, dirname} from 'path';
 import vm from 'vm';
 
+// node:sqlite 在旧 Node 上不存在；延迟到构建时再报错，至少 --help/usage 还能跑
+let DatabaseSync=null, sqliteLoadError=null;
+try{ ({DatabaseSync}=await import('node:sqlite')); }catch(e){ sqliteLoadError=e; }
+
 export const ROOT=resolve(dirname(fileURLToPath(import.meta.url)),'..');
-export const SOURCE='supermarket_full_tags_317423.json';
+export const SOURCE='tag.sqlite';
+// 表结构：tags(name TEXT PRIMARY KEY, category INTEGER, cn_name TEXT, post_count INTEGER)
+// 按 rowid 取即为源库写入顺序（热度降序），对应原 JSON 的数组顺序。
+export const SOURCE_QUERY='SELECT name, cn_name, category, post_count FROM tags ORDER BY rowid';
 export const TEMPLATE='src/template.html';
 export const OUTPUT='ai-prompt-supermarket.html';
 // 模板里的占位行，构建时整行替换成内联数据（保持产物仍是单行巨行）
@@ -51,7 +59,21 @@ function sameData(a,b){
   return false;
 }
 
-export function readSource(){ return JSON.parse(readFileSync(paths.source,'utf8')); }
+/* 从 tag.sqlite 读出全量行，转换成页面用的 [en,zh,category,count] 结构 */
+export function readSource(){
+  assert(existsSync(paths.source), '找不到数据源 '+SOURCE+'（应放在项目根目录）');
+  assert(DatabaseSync, '当前 Node '+process.version+' 无法加载 node:sqlite，构建需要 Node 22.13+（23.4+ 亦可）'
+    +(sqliteLoadError&&sqliteLoadError.message?'：'+sqliteLoadError.message:''));
+  let db;
+  try{
+    db=new DatabaseSync(paths.source,{readOnly:true});
+    return db.prepare(SOURCE_QUERY).all().map(r=>[r.name,r.cn_name,r.category,r.post_count]);
+  }catch(e){
+    throw new Error('读取 '+SOURCE+' 失败（'+SOURCE_QUERY+'）：'+e.message);
+  }finally{
+    if(db) db.close();
+  }
+}
 
 /* 校验源数据并算出统计：行结构、分类号、count、tagKey 唯一、中文重名 / 标点 */
 export function analyze(rows){

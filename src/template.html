@@ -14,9 +14,10 @@
   根目录 ai-prompt-supermarket.html 是构建产物（已 gitignore，不进仓库），由 `node tools/build.mjs` 生成，不要手改。
   全量标签库不在模板里：模板只有一行占位
     const FULL_TAGS = /*__FULL_TAGS__*/[];
-  构建时整行替换成单行约 14MB、317,423 条的数据（来源 supermarket_full_tags_317423.json）。
-  ● 查 / 改某个标签：用 Grep 搜源 JSON 的 `["标签英文名",`（例：["newest",）或直接 grep JSON。
-  ● 全量数据只改源 JSON，再 `node tools/build.mjs`；`--check` 校验产物与模板 / 数据一致、脚本语法可编译。
+  构建时整行替换成单行约 12MB、33.7 万条的数据（来源 tag.sqlite 的 tags 表）。
+  ● 查 / 改某个标签：用 sqlite3 / DB 工具查 tag.sqlite，表 tags(name, category, cn_name, post_count)，
+      例：SELECT * FROM tags WHERE name='newest';
+  ● 全量数据只改 tag.sqlite，再 `node tools/build.mjs`；`--check` 校验产物与模板 / 数据一致、脚本语法可编译。
 
   模板结构（按先后顺序，声明名即 Grep 定位锚点）：
   <style> 区               全部样式
@@ -36,12 +37,12 @@
   分类号：0=通用  1=画师  3=版权/作品  4=角色  5=meta（元信息，Danbooru 枚举本来就没有 2）
   ● 加到「常用分类」（无需碰数据）：在模板的 const CURATED 对应分类数组加英文名（如 "newest"）；
       库里没这词 → 顺便在 CURATED_ZH 补中文（否则界面显示英文原文）。该改动只影响界面分类。
-  ● 加到「全局搜索也可搜」：把整条 ["英文名","中文",分类号,0] 写进源 JSON，
-      再 `node tools/build.mjs`，然后 `--check`。
-  ● 删全量标签：只改源 JSON，build + check。
-  ● 改中文名：优先 CURATED_ZH（改动在模板），或改源 JSON 里对应条目再 build。
+  ● 加到「全局搜索也可搜」：往 tag.sqlite 的 tags 表插一行 (name, category, cn_name, post_count)，
+      例：INSERT INTO tags VALUES ('newest', 5, '最新', 0); 再 `node tools/build.mjs`，然后 `--check`。
+  ● 删全量标签：DELETE FROM tags WHERE name='...'，build + check。
+  ● 改中文名：优先 CURATED_ZH（改动在模板），或 UPDATE tags SET cn_name='...' WHERE name='...' 再 build。
   ● 分类号 5（meta：分辨率 / 评论 / 来源 / 差分 / 媒材）不自动成类，只有 CURATED 里点名的
-      才会出现在「来源 / 画质」「媒材 / 手绘」；其余 400 多条只能靠全局搜索找到。
+      才会出现在「来源 / 画质」「媒材 / 手绘」；其余 700 多条只能靠全局搜索找到。
   ● count 影响排序：新词填 0 可搜到，但不会排进「全部」前 1000。
 -->
 <style>
@@ -542,7 +543,7 @@ function buildCats(){
     fullCat[c]=pool.map(([name,cn])=>({en:name,zh:cn}));
     catMap[c]=fullCat[c].slice(0,SPECCAP[c]);
   });
-  // cat=5 的 meta（分辨率 / 评论 / 来源 / 差分 / 媒材等）共 418 条，绝大多数对出图无用，
+  // cat=5 的 meta（分辨率 / 评论 / 来源 / 差分 / 媒材等）共 753 条，绝大多数对出图无用，
   // 不再整类收进面板：只保留 CURATED 里手工点名的那些（「来源 / 画质」「媒材 / 手绘」），
   // 其余仅能通过全局搜索找到。
   Object.keys(catMap).forEach(c=>{ if(!(c in fullCat)) fullCat[c]=catMap[c].slice(); });  // 精选类等：完整=当前
