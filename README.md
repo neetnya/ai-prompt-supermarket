@@ -2,6 +2,8 @@
 
 由开源项目 [ai-prompt-supermarket](https://github.com/BFRKQSB7/ai-prompt-supermarket) 改造而来。本地离线的 AI 绘画提示词生成工具：点选标签直接生成提示词，一键切换中 / 英文输出。
 
+TAG数据来自：https://github.com/ffdkj/ffdkj-Danbooru_Tag-Chinese-English-Translation-Table
+
 ## License
 
 包含的原项目代码遵循 MIT 许可证，版权归 Copyright (c) 2026 BFRKQSB7 所有。详见 `LICENSE-original` 文件。
