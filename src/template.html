@@ -782,17 +782,9 @@ function tagStateClass(en){
 // 回填时再把 \( \) \\ 还原成真实字符。
 function escapePromptLabel(label){ return String(label).replace(/[\\()]/g,'\\$&'); }
 function unescapePromptLabel(label){ return String(label).replace(/\\([\\()])/g,'$1'); }
-function quoteLabel(label,escapeParens){
-  // 只有在包含分隔符（逗号/分号/换行）或双引号时才用双引号包裹，避免普通括号/反斜杠被自动补引号
-  if(escapeParens){
-    const text=escapePromptLabel(label);
-    return /[,，;；\n"]/.test(label)?JSON.stringify(text):text;
-  }
-  return /[,，;；\n"]/.test(label)?JSON.stringify(label):label;
-}
 function promptEntryText(s){
   const label=s.raw||!s.zh?s.en:(outputLanguage==='zh'?labelFor(s.en,s.zh):s.en.replace(/_/g,' '));
-  const text=quoteLabel(label,!s.raw&&!!s.zh);
+  const text=!s.raw&&!!s.zh?escapePromptLabel(label):label;
   return s.w!=null&&s.w!==1?`(${text}:${s.w})`:text;
 }
 function formatOutputs(){
@@ -1157,9 +1149,7 @@ function sorterCurrentKeys(){
 function sorterTextOf(key){
   const s=sorter&&sorter.items.get(key);
   if(!s) return String(key).replace(/^raw:/,'');
-  const label=s.raw||!s.zh?s.en:(outputLanguage==='zh'?labelFor(s.en,s.zh):s.en.replace(/_/g,' '));
-  const text=quoteLabel(label,!s.raw&&!!s.zh);
-  return s.w!=null&&s.w!==1?`(${text}:${s.w})`:text;
+  return promptEntryText(s);
 }
 function sorterUpdateMeta(){
   if(!sorter) return;
