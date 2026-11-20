@@ -17,8 +17,8 @@ TAG数据来自：https://github.com/ffdkj/ffdkj-Danbooru_Tag-Chinese-English-Tr
 - **全部浏览**：一键查看最常用 1000 条
 - **负面提示词**：内置负面词分类，自动分流到负面框
 - **输出语言**：默认英文输出，右上角按钮一键切换中文 / 英文；切换只改变输出格式，标签身份、顺序、正负、权重、自由文本均保持不变。英文模式将下划线转为空格（`long_hair` → `long hair`）
-- **框内操作**：复制（支持 `file://` 离线降级兜底）/ 清未识别按钮就在各自文本框的右上角，正负两栏互不影响（清未识别只清本栏未匹配到数据库的原文）
-- **拖动排序与分组整理**：右侧胶囊面板可直接拖动排序，点「排序整理」支持按分类一键分组或自定义分组；右键胶囊设权重，`±` 在正负之间翻转
+- **框内操作**：复制（支持 `file://` 离线降级兜底）/ 清未识别按钮在各自文本框右上角；排序整理 / 一键重置权重在各自标签栏顶栏，正负两栏互不影响
+- **拖动排序与分组整理**：右侧胶囊面板可直接拖动排序，点「排序整理」支持按分类一键分组、自定义分组、一键重置权重与撤销；右键胶囊设权重，`±` 在正负之间翻转
 - **中英文回填识别**：正面 / 负面框支持中文、英文、混合文本和 `(标签:1.2)` / `(标签)` 权重；标签名中的括号在输出时自动转义为 `\(` `\)`，回填时还原；未知文本保留原文并标 `?`
 - **选中高亮**：切换一级 / 二级分类和搜索时，正负选中状态均正确恢复
 
@@ -48,24 +48,22 @@ node tools/build.mjs
 | `src/template.html` | HTML 骨架与内联占位符 |
 | `src/style.css` | 全部样式（深色主题、弹窗、Toast、权重编辑器） |
 | `src/rules.mjs` | 精选分类 `CURATED`、自动归类 `AUTO`、翻译补丁 `CURATED_ZH`、二级分类 `SUBS` 与预编译正则 |
-| `src/parser.mjs` | `tagKey`、括号转义与提示词回填解析器（纯函数，可单测） |
+| `src/parser.mjs` | `tagKey`、括号转义与提示词回填解析器 |
 | `src/app.js` | 状态管理、惰性索引、弹窗渲染、拖拽排序、排序整理、全局搜索 |
 | `tools/build.mjs` | 构建与校验脚本，仅用 Node 标准库（`node:sqlite`），无 npm 依赖 |
-| `tests/` | 基于 `node --test` 的解析器、规则与构建自动化测试 |
 | `tag.sqlite` | **全量数据源**：`tags(name, category, cn_name, post_count)`，337,393 条 |
 
-## 构建、校验与测试
+## 构建与校验
 
 ```sh
 node tools/build.mjs          # 模板 + src/* + tag.sqlite → ai-prompt-supermarket.html
 node tools/build.mjs --check  # 只读校验，不写文件
 node tools/build.mjs --stats  # 只打印数据统计
-node --test tests/*.test.mjs  # 运行解析器、规则与构建单测（无需 tag.sqlite）
 ```
 
 `build` 先从 `tag.sqlite` 的 `tags` 表按 `post_count DESC, rowid ASC` 读出全量行，再校验（行结构、分类号、count、tagKey 唯一），不通过就不落盘，并通过 `JSON.parse("...")` 内联以提升浏览器解析速度。`--check` 重新渲染一遍，与磁盘产物**逐字符比对**，再确认内联数组可解析、每个 `<script>` 能通过编译。
 
-构建依赖 Node 内置 `node:sqlite`，需 **Node 22.13+**（23.4+ 亦可；更早的 22.x 需加 `--experimental-sqlite`）。`--check` 的 JS 语法检查与 `node --test` 单元测试在 Node 18+ 即可运行。
+构建依赖 Node 内置 `node:sqlite`，需 **Node 22.13+**（23.4+ 亦可；更早的 22.x 需加 `--experimental-sqlite`）。
 
 ## 数据约定
 

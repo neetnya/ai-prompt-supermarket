@@ -836,6 +836,16 @@ function sorterMergeGroups() {
   sorter.groups = [{ id: 'unassigned', name: '未分组', fixed: true, keys: sorterFlatKeys() }];
   renderSorter();
 }
+function sorterResetWeights() {
+  if (!sorter) return;
+  let count = 0;
+  sorter.items.forEach(s => { if (s.w != null && s.w !== 1) count++; });
+  if (!count) { flash('✓ 当前窗口没有自定义权重'); return; }
+  sorterPushHistory();
+  sorter.items.forEach(s => { if (s.w != null && s.w !== 1) s.w = null; });
+  renderSorter();
+  flash('✓ 已重置 ' + count + ' 个标签的权重（应用后生效）');
+}
 function sorterUndo() {
   if (!sorter || !sorter.history.length) return;
   const prev = sorter.history.pop();
@@ -1176,6 +1186,21 @@ function clearUnmatched(isNegSide) {
   keys.forEach(k => selected.delete(k));
   refresh();
   flash(keys.length ? `✓ 已清理${isNegSide ? '负面' : '正面'}区 ${keys.length} 个未识别标签` : `✓ ${isNegSide ? '负面' : '正面'}区没有未识别标签`);
+}
+function resetWeights(isNegSide) {
+  let count = 0;
+  selected.forEach(s => {
+    if (!!s.neg === isNegSide && s.w != null && s.w !== 1) {
+      s.w = null;
+      count++;
+    }
+  });
+  if (!count) {
+    flash(`✓ ${isNegSide ? '负面' : '正面'}区没有自定义权重`);
+    return;
+  }
+  refresh();
+  flash(`✓ 已重置${isNegSide ? '负面' : '正面'}区 ${count} 个标签的权重`);
 }
 
 /* ============ 启动 ============ */

@@ -16,8 +16,8 @@
   源码结构：
   src/template.html  HTML 骨架与内联占位符
   src/style.css      全部样式（深色主题、弹窗、Toast、权重编辑器）
-  src/rules.mjs       精选分类 CURATED / 自动归类 AUTO / 翻译补丁 CURATED_ZH / 二级分类 SUBS
-  src/parser.mjs      tagKey / 括号转义 / 回填解析器（纯函数，可单测）
+  src/rules.mjs      精选分类 CURATED / 自动归类 AUTO / 翻译补丁 CURATED_ZH / 二级分类 SUBS
+  src/parser.mjs     tagKey / 括号转义 / 回填解析器（纯函数）
   src/app.js         状态管理、惰性索引、面板渲染、拖拽排序、排序整理、全局搜索
   tools/build.mjs    零依赖构建与校验脚本（node tools/build.mjs [--check|--stats]）
 -->
@@ -68,11 +68,19 @@
     </div>
     <div class="col">
       <div class="chipbox">
-        <label>正面标签 <span class="cnt" id="posChipCnt">0</span><button class="mini" onclick="openSorter('pos')" title="分组整理标签顺序（按分类 / 手动归类）">排序整理</button><span class="tip">拖动排序 · 右键设权重</span></label>
+        <label>正面标签 <span class="cnt" id="posChipCnt">0</span>
+          <button class="mini" onclick="openSorter('pos')" title="分组整理标签顺序（按分类 / 手动归类）">排序整理</button>
+          <button class="mini" onclick="resetWeights(false)" title="一键将正面区所有标签的权重重置为默认（1）">重置权重</button>
+          <span class="tip">拖动排序 · 右键设权重</span>
+        </label>
         <div class="chips" id="posChips"></div>
       </div>
       <div class="chipbox">
-        <label>负面标签 <span class="cnt" id="negChipCnt">0</span><button class="mini" onclick="openSorter('neg')" title="分组整理标签顺序（按分类 / 手动归类）">排序整理</button><span class="tip">± 可翻回正面</span></label>
+        <label>负面标签 <span class="cnt" id="negChipCnt">0</span>
+          <button class="mini" onclick="openSorter('neg')" title="分组整理标签顺序（按分类 / 手动归类）">排序整理</button>
+          <button class="mini" onclick="resetWeights(true)" title="一键将负面区所有标签的权重重置为默认（1）">重置权重</button>
+          <span class="tip">± 可翻回正面</span>
+        </label>
         <div class="chips" id="negChips"></div>
       </div>
     </div>
@@ -110,7 +118,8 @@
       <button class="btn ghost" onclick="sorterAutoGroup()" title="按筛选窗口的分类顺序自动分组，未识别的进入未分组">一键按分类排序</button>
       <button class="btn ghost" onclick="sorterAddGroup()" title="新建一个空分组，放到未分组之前">＋ 新建分组</button>
       <button class="btn ghost" onclick="sorterMergeGroups()" title="把所有分组按当前顺序合并回未分组">合并为一组</button>
-      <button class="btn ghost" id="sorterUndo" onclick="sorterUndo()" title="撤销上一次自动分组 / 新建 / 删除 / 合并" disabled>↶ 撤销</button>
+      <button class="btn ghost" onclick="sorterResetWeights()" title="将当前弹窗内所有标签的权重重置为默认（1）">重置权重</button>
+      <button class="btn ghost" id="sorterUndo" onclick="sorterUndo()" title="撤销上一次自动分组 / 新建 / 删除 / 合并 / 重置权重" disabled>↶ 撤销</button>
       <span class="sorter-stat" id="sorterStat"></span>
     </div>
     <div class="sorter-body" id="sorterBody"></div>
